@@ -1,3 +1,4 @@
+# Gets a file from the command line (0D) and calculates the CQ time
 import numpy as np
 import sys
 
