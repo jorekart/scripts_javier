@@ -1,4 +1,4 @@
-# rsync -av origin_dir replicated_dir --exclude-from='exclude_list'
+# rsync -av origin_dir replicated_dir --exclude-from='~/scripts_javier/exclude_list'
 *.h5
 *.vtk
 postproc
