@@ -20,8 +20,8 @@ import re
 ######## Input parameters ####################################
 
 # Add or remove the profiles that you want (the names must
-# match the jorek2_postproc names)
-profs = ["ne", "Te", "currdens"]
+# match the jorek2_postproc names, except q-profile)
+profs = ["ne", "Te", "currdens", "q-profile"]
 
 # Specify the requested times in ms
 times = np.array([0,1])
@@ -123,6 +123,15 @@ for prof in profs:
         densimp.postproc = "nimp"
         densimp.log      = False
         prof_list.append(densimp)
+
+    elif (prof=="q-profile"): 
+        qprof = profile()
+        qprof.label    = "q-profile"
+        qprof.fact     = 1
+        qprof.postproc = "None"
+        qprof.log      = False
+        prof_list.append(qprof)
+
     else:
         print("invalid profile!")
         break
@@ -167,8 +176,13 @@ for i in range(0,nplot):
         f.write("unset format x" + "\n")
         f.write("set xtics" + "\n")
         f.write("set xlabel 'Psi_N'" + "\n")
-        
-    f.write("plot for [i=1:ntimes] 'toplot/average'.i.'.dat' u 1:($"+str(i+2)+"*"+str(prof_list[i].fact)+") w l\n")
+
+
+    if (prof_list[i].label == 'q-profile'):        
+        f.write("plot for [i=1:ntimes] 'toplot/qprof'.i.'.dat' u 1:($"+str(2)+"*"+str(prof_list[i].fact)+") w l\n")
+    else:
+        f.write("plot for [i=1:ntimes] 'toplot/average'.i.'.dat' u 1:($"+str(i+2)+"*"+str(prof_list[i].fact)+") w l\n")
+
     f.write("\n")
 
 
