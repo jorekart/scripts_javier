@@ -139,7 +139,7 @@ for prof in profs:
 # Generate gnuplot file
 f = open("gnu_script", "w")
 f.write("reset \n")
-f.write( "set terminal qt size 600,900\n")  
+f.write( "set terminal x11 size 600,900\n")  
 f.write( "set lmargin at screen 0.25\n")  
 f.write( "set multiplot\n")  
 f.write( "unset key\n")  
@@ -157,7 +157,7 @@ f.write( "set grid\n")
 f.write("\n")
 
 xsize = 0.7
-ysize = float(1/nplot)
+ysize = 1.0/ float(nplot)
 
 f.write("ntimes=" + str(ntimes) + "\n")
 
