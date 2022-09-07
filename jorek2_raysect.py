@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+from interp_jorek import *
 from raysect.primitive import Sphere, import_vtk, export_vtk, Box
 from raysect.optical.observer import MeshPixel, MeshCamera, PowerPipeline0D, PowerPipeline1D, MonoAdaptiveSampler1D
 from raysect.core import translate, rotate_x
@@ -19,6 +20,12 @@ from raysect.optical.material import Lambert, UniformSurfaceEmitter, Roughen
 from raysect.optical.material import RoughConductor
 from raysect.optical import InterpolatedSF
 from raysect.core.math.function.float.function2d.interpolate import Interpolator2DMesh, Discrete2DMesh
+
+class elm_class:
+    def __init__(self):
+        self.vertex_ind = np.empty(0)
+        self.RZ         = np.empty(0)
+        self.parent     = 0
 
 def quads_to_tris(quads, cell_values_quads):
     tris = [[None for j in range(3)] for i in range(2*len(quads))]
@@ -45,18 +52,20 @@ import logging
 
 
 username = "artolaj"
-device = "leon_test"
+device = "di_SPI"
 
-shot_list = [111114]
+shot_list = [111111]
 run = 1
+
+n_sub = 1
 
 logging.basicConfig(level=logging.DEBUG, filename='./logfile.log')
 shot_dict = {} 
 for shot in shot_list:
-    try:
+#    try:
         x = imas.ids(shot, run)
         x.open_env(username, device, "3")
-        x.mhd.get()
+        x.radiation.get()
         # 0d
         pts = []
 
@@ -66,18 +75,89 @@ for shot in shot_list:
         z = [] # z coordinate -> input for raysect
         quadrangles = [] # quadrangle node IDs -> input for raysect
 
-        nr_nodes = len(x.mhd.grid_ggd[0].space[0].objects_per_dimension[0].object.array)
-        nr_faces = len(x.mhd.grid_ggd[0].space[0].objects_per_dimension[2].object.array)
+        nr_nodes = len(x.radiation.grid_ggd[0].space[0].objects_per_dimension[0].object.array)
+        nr_faces = len(x.radiation.grid_ggd[0].space[0].objects_per_dimension[2].object.array)
 
         for node_id in range(nr_nodes):
-            pts.append(x.mhd.grid_ggd[0].space[0].objects_per_dimension[0].object[node_id].geometry)
+            pts.append(x.radiation.grid_ggd[0].space[0].objects_per_dimension[0].object[node_id].geometry)
 
         # 2d
         faces = []
         for face_id in range(nr_faces):
-            faces.append(x.mhd.grid_ggd[0].space[0].objects_per_dimension[2].object[face_id].nodes)
+            faces.append(x.radiation.grid_ggd[0].space[0].objects_per_dimension[2].object[face_id].nodes)
+
+        # JOREK type namelist
+        element_list  = reconstruct_element_list( x.radiation.grid_ggd[0] )
+        node_list     = reconstruct_node_list(    x.radiation.grid_ggd[0] )
+        val_coeff     = x.radiation.process[0].ggd.array[0].ion[0].emissivity.array[0].coefficients
+ 
+        # Calculate emissivity in element center
+        q_to_raysect = np.zeros(nr_faces)
+        for face_id in range(nr_faces):
+            q_to_raysect[face_id] =  interp_val(val_coeff, node_list, element_list, face_id, 0.5, 0.5, 0.0)
+
+
+        # Get R and Z vectors              
+        for node in node_list.nodes:
+            r.append(  node.x[0,0]  )
+            z.append(  node.x[0,1]  )
+
+        # subdivide the grid
+#        nr_nodes_new = nr_nodes*n_sub**2
+#        nr_faces_new = nr_faces*n_sub**2
+
+#        sp = np.linspace(0.0, 1.0, n_sub)
+#        tp = np.linspace(0.0, 1.0, n_sub)
+
+#        ref_elm_list = []
+#        nvertex = 4
+#
+#
+#        # Create refined list of elements
+#        for face_id in range(nr_faces):
+#
+#            for is1 in range(0,n_sub):
+#                s1 = float(is1)  /float(n_sub)
+#                s2 = float(is1+1)/float(n_sub)
+#                for it1 in range(0,n_sub):
+#                    t1 = float(it1  )/float(n_sub)
+#                    t2 = float(it1+1)/float(n_sub)
+#
+#                    # fill sub elm
+#                    elm        = elm_class()
+#                    elm.parent = face_id
+#
+#                    RZ1 = interp_RZ(node_list, element_list, face_id, s1, t1)
+#                    RZ2 = interp_RZ(node_list, element_list, face_id, s1, t2)
+#                    RZ3 = interp_RZ(node_list, element_list, face_id, s2, t1)
+#                    RZ4 = interp_RZ(node_list, element_list, face_id, s2, t2)
+#
+#                    elm.RZ = np.array( [RZ1, RZ2, RZ3, RZ4] )
+#
+#                    ref_elm_list.append( elm )
+#
+#        vertex_node_array = np.zeros(shape=(nvertex, nr_faces_new))
+#
+#        node_RZ = np.zeros(shape=(nr_nodes_new, 2)) 
+#
+#        print(nr_nodes_new, nr_faces_new, nvertex)
+#        print("connect")            
+        # Brute force creation of connectivity matrix
+#        for inode in range(0, nr_nodes_new):
+#            node_RZ[inode] = np.array([-1,-1])
+
+#            for ielm in range(0,nr_faces_new):
+#                elm = ref_elm_list[ielm]
+#                for iv in range(0, nvertex):
+#                    pass
+#                    if (node_RZ[inode,0]< 0):
+#                        node_RZ[inode] = elm.RZ[iv]
+#                        vertex_node_array[iv, ielm] = inode 
+
+
+        print("done")            
     
-        with open("solps_radiation_shot"+str(shot)+"_run"+str(run)+".vtk", "w") as f:
+        with open("jorek_radiation_shot"+str(shot)+"_run"+str(run)+".vtk", "w") as f:
             f.write("# vtk DataFile Version 2.0\n")
             f.write("vtk output\n")
             f.write("ASCII\n")
@@ -110,23 +190,14 @@ for shot in shot_list:
 
             f.write("\n")
             f.write("CELL_DATA "+str(nr_faces)+"\n")
-            q_to_raysect = np.zeros(nr_faces)
 #            q_to_raysect = 1.0
-#            for process_ind in range(len(x.radiation.process)):
-#                for ion_ind in range(len(x.radiation.process[process_ind].ggd[0].ion)):
-#                    nr_grid_subsets = len(x.radiation.process[0].ggd[0].ion[ion_ind].emissivity.array)
-#                    for grid_subset in range(nr_grid_subsets):
-#                        if len(x.radiation.process[0].ggd[0].ion[ion_ind].emissivity[grid_subset].values) == nr_faces:
-#                            data = x.radiation.process[0].ggd[0].ion[ion_ind].emissivity[grid_subset].values
-#                            f.write("SCALARS Q_process"+str(process_ind+1)+"_ion_"+str(ion_ind+1)+"_grid_subset_"+str(grid_subset+1)+"[W/m^2] float 1\n")
-#                            f.write("LOOKUP_TABLE default\n")
-#                            for q in enumerate(data):
-#                                f.write(str(q[1])+"\n")
-#                                # Append quadrangle power value for Raysect
-#                                q_to_raysect[q[0]] += q[1]
-#           
-    except:
-        logging.exception("Error reading shot "+str(shot)+":")
+            f.write("SCALARS Q_process"+str(1)+"_ion_"+str(1)+"_grid_subset_"+str(1)+"[W/m^2] float 1\n")
+            f.write("LOOKUP_TABLE default\n")
+            for q in q_to_raysect:
+                f.write(str(q)+"\n")
+           
+#    except:
+#        logging.exception("Error reading shot "+str(shot)+":")
 
 
 print("end")
