@@ -20,7 +20,7 @@ from cherab.core.math import Constant3D, ConstantVector3D, sample3d, Axisymmetri
 from raysect.optical.material import Lambert, UniformSurfaceEmitter, Roughen
 from raysect.optical.material import RoughConductor
 from raysect.optical import InterpolatedSF
-from raysect.core.math.function.float.function2d.interpolate import Interpolator2DMesh, Discrete2DMesh
+from raysect.core.math.function.float.function3d.interpolate import Discrete3DMesh
 
 class elm_class:
     def __init__(self):
@@ -70,7 +70,7 @@ n_sub = 1
 logging.basicConfig(level=logging.DEBUG, filename='./logfile.log')
 shot_dict = {} 
 for shot in shot_list:
-#    try:
+    try:
         x = imas.ids(shot, run)
         x.open_env(username, device, "3")
         x.radiation.get()
@@ -110,58 +110,6 @@ for shot in shot_list:
             r.append(  node.x[0,0]  )
             z.append(  node.x[0,1]  )
 
-        # subdivide the grid
-#        nr_nodes_new = nr_nodes*n_sub**2
-#        nr_faces_new = nr_faces*n_sub**2
-
-#        sp = np.linspace(0.0, 1.0, n_sub)
-#        tp = np.linspace(0.0, 1.0, n_sub)
-
-#        ref_elm_list = []
-#        nvertex = 4
-#
-#
-#        # Create refined list of elements
-#        for face_id in range(nr_faces):
-#
-#            for is1 in range(0,n_sub):
-#                s1 = float(is1)  /float(n_sub)
-#                s2 = float(is1+1)/float(n_sub)
-#                for it1 in range(0,n_sub):
-#                    t1 = float(it1  )/float(n_sub)
-#                    t2 = float(it1+1)/float(n_sub)
-#
-#                    # fill sub elm
-#                    elm        = elm_class()
-#                    elm.parent = face_id
-#
-#                    RZ1 = interp_RZ(node_list, element_list, face_id, s1, t1)
-#                    RZ2 = interp_RZ(node_list, element_list, face_id, s1, t2)
-#                    RZ3 = interp_RZ(node_list, element_list, face_id, s2, t1)
-#                    RZ4 = interp_RZ(node_list, element_list, face_id, s2, t2)
-#
-#                    elm.RZ = np.array( [RZ1, RZ2, RZ3, RZ4] )
-#
-#                    ref_elm_list.append( elm )
-#
-#        vertex_node_array = np.zeros(shape=(nvertex, nr_faces_new))
-#
-#        node_RZ = np.zeros(shape=(nr_nodes_new, 2)) 
-#
-#        print(nr_nodes_new, nr_faces_new, nvertex)
-#        print("connect")            
-        # Brute force creation of connectivity matrix
-#        for inode in range(0, nr_nodes_new):
-#            node_RZ[inode] = np.array([-1,-1])
-
-#            for ielm in range(0,nr_faces_new):
-#                elm = ref_elm_list[ielm]
-#                for iv in range(0, nvertex):
-#                    pass
-#                    if (node_RZ[inode,0]< 0):
-#                        node_RZ[inode] = elm.RZ[iv]
-#                        vertex_node_array[iv, ielm] = inode 
-
 
         print("done")            
     
@@ -198,14 +146,13 @@ for shot in shot_list:
 
             f.write("\n")
             f.write("CELL_DATA "+str(nr_faces)+"\n")
-#            q_to_raysect = 1.0
             f.write("SCALARS Q_process"+str(1)+"_ion_"+str(1)+"_grid_subset_"+str(1)+"[W/m^2] float 1\n")
             f.write("LOOKUP_TABLE default\n")
             for q in q_to_raysect:
                 f.write(str(q)+"\n")
            
-#    except:
-#        logging.exception("Error reading shot "+str(shot)+":")
+    except:
+        logging.exception("Error reading shot "+str(shot)+":")
 
 
 print("end")
@@ -213,7 +160,7 @@ print("end")
 # Calculate tetrahedra mesh
 print("doing tetrahedra...")
 
-N_phi       = 32                  # Number of toroidal points
+N_phi       = 32                 # Number of toroidal points
 N_elm       = element_list.n_elm   # Number of poloidal quadrilateral elements
 N_pol_nodes = node_list.n_nodes    # Number of nodes in the poloidal plane
 N_vertex    = 4                    # Number of vertices of each element
@@ -358,12 +305,12 @@ height = max(z)-min(z)
 vertex_coords = np.array([[r[i], z[i]] for i in range(len(r))])
 
 # Define r-z mesh in Raysect
-radiation_interp = Discrete2DMesh(vertex_coords, triangles, tria_values,
+print('Creating 3D interpolation function')
+radiation_interp = Discrete3DMesh(nodes_xyz, tetra_ind, tetra_val,
                                   limit=False, default_value=0)
 
-# Extend r-z mesh in toroidal direction
-rad_function_3d = AxisymmetricMapper(radiation_interp)
-radiation_emitter = VolumeTransform(RadiationFunction(rad_function_3d))
+print('Start RaySect...')
+radiation_emitter = VolumeTransform(RadiationFunction(radiation_interp))
 
 # Define world in Raysect
 world = World()
@@ -415,6 +362,5 @@ error = frame.errors() / camera.collection_areas
 triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error}
 
 # Define output name and export result
-output_basename = "example"
+output_basename = "JOREK3D_bolomer_power"
 export_vtk(bolometer1801, output_basename + '.vtk', triangle_data=triangle_data)
-
