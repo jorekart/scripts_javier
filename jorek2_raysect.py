@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+from sys import exit
 from interp_jorek import *
 from raysect.primitive import Sphere, import_vtk, export_vtk, Box
 from raysect.optical.observer import MeshPixel, MeshCamera, PowerPipeline0D, PowerPipeline1D, MonoAdaptiveSampler1D
@@ -45,6 +46,13 @@ def quads_to_tris(quads, cell_values_quads):
         tris[j + 1][1] = n3
         tris[j + 1][2] = n0
     return tris, cell_values_tris
+
+
+def to_cart_coord(R,Z,phi):
+    x =  R * np.cos(phi)
+    y = -R * np.sin(phi)
+
+    return np.array( [x,y,Z] )
 
 
 import imas
@@ -201,6 +209,140 @@ for shot in shot_list:
 
 
 print("end")
+
+# Calculate tetrahedra mesh
+print("doing tetrahedra...")
+
+N_phi       = 32                  # Number of toroidal points
+N_elm       = element_list.n_elm   # Number of poloidal quadrilateral elements
+N_pol_nodes = node_list.n_nodes    # Number of nodes in the poloidal plane
+N_vertex    = 4                    # Number of vertices of each element
+N_loc_tet   = 5                    # Every rectangular prism is divided into 5 tetrahedra 
+
+print('Npol_nodes = ' + str(N_pol_nodes))
+print('Nelem      = ' + str(N_elm))
+
+n_tetra_nodes   = N_phi * N_pol_nodes
+n_tetra         = N_phi * N_elm * N_loc_tet
+nodes_xyz       = np.zeros( shape=(n_tetra_nodes, 3) )
+tetra_ind       = np.zeros( shape=(n_tetra, 4), dtype=int )
+tetra_val       = np.zeros( n_tetra )
+
+# Fill global node list
+for i_pol_node in range(0, N_pol_nodes):
+
+    Rnode = node_list.nodes[i_pol_node].x[0,0]
+    Znode = node_list.nodes[i_pol_node].x[0,1]
+
+    # Go toroidally
+    for i_phi in range(0,N_phi):
+
+        phi = float(i_phi  ) / float(N_phi) * 2.0*np.pi 
+
+        i_node_glob = i_phi * N_pol_nodes + i_pol_node 
+
+        nodes_xyz[i_node_glob] = to_cart_coord( Rnode, Znode, phi )
+
+
+# Go over elements and form prisms
+i_tetra = -1
+
+for i_elm in range(0, N_elm):
+
+    # Go toroidally
+    for i_phi in range(0,N_phi):
+
+        # Global node indices
+        i0 =element_list.elems[i_elm].vertex_ind[0]-1 
+        i1 =element_list.elems[i_elm].vertex_ind[1]-1 
+        i2 =element_list.elems[i_elm].vertex_ind[2]-1 
+        i3 =element_list.elems[i_elm].vertex_ind[3]-1 
+
+
+        # Bottom face
+        B0_ind = i_phi *N_pol_nodes + i0 
+        B1_ind = i_phi *N_pol_nodes + i1 
+        B2_ind = i_phi *N_pol_nodes + i2
+        B3_ind = i_phi *N_pol_nodes + i3
+
+        if (i_phi == N_phi - 1):
+            i_phiT = 0
+        else:
+            i_phiT = i_phi +1 
+
+        # Top face
+        T0_ind = i_phiT*N_pol_nodes + i0
+        T1_ind = i_phiT*N_pol_nodes + i1
+        T2_ind = i_phiT*N_pol_nodes + i2
+        T3_ind = i_phiT*N_pol_nodes + i3
+
+        # Emissivity value at prism center
+        phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
+        val     = interp_val(val_coeff, node_list, element_list, i_elm, 0.5, 0.5, phi_mid)
+
+        # Define the 5 tetrahedra and their indices
+        # Tetrahedron 0 = 3,1,0,0'
+        i_tetra            = i_tetra + 1 
+        tetra_ind[i_tetra] = [B3_ind, B1_ind, B0_ind, T0_ind]     
+        tetra_val[i_tetra] = val  
+
+        # Tetrahedron 1 = 3,1,2,2'
+        i_tetra            = i_tetra + 1 
+        tetra_ind[i_tetra] = [B3_ind, B1_ind, B2_ind, T2_ind]    
+        tetra_val[i_tetra] = val  
+
+        # Tetrahedron 2 = 3,3',0',2'
+        i_tetra            = i_tetra + 1 
+        tetra_ind[i_tetra] = [B3_ind, T3_ind, T0_ind, T2_ind]     
+        tetra_val[i_tetra] = val  
+
+        # Tetrahedron 3 = 0',1,1',2'
+        i_tetra            = i_tetra + 1 
+        tetra_ind[i_tetra] = [T0_ind, B1_ind, T1_ind, T2_ind]     
+        tetra_val[i_tetra] = val  
+
+        # Tetrahedron 4 = 3, 1, 2', 0'
+        i_tetra            = i_tetra + 1 
+        tetra_ind[i_tetra] =  [B3_ind, B1_ind, T2_ind, T0_ind]     
+        tetra_val[i_tetra] = val  
+
+
+with open("jorek3d_radiation_shot"+str(shot)+"_run"+str(run)+".vtk", "w") as f:
+    f.write("# vtk DataFile Version 2.0\n")
+    f.write("vtk output\n")
+    f.write("ASCII\n")
+    f.write("\n")
+    f.write("DATASET UNSTRUCTURED_GRID\n")
+    f.write("POINTS "+str(n_tetra_nodes)+" float\n")
+    for node in nodes_xyz:
+        f.write(str(node[0])+" "+str(node[1])+" "+str(node[2])+" \n") 
+
+    f.write("\n")
+    f.write("CELLS "+str(n_tetra)+" "+str(n_tetra*5)+"\n")
+
+    for tetra in tetra_ind:
+        f.write("4 "+str(tetra[0])+" "+
+                 str(tetra[1])+" "+
+                 str(tetra[2])+" "+
+                 str(tetra[3])+"\n")
+
+    f.write("\n")
+
+    f.write("CELL_TYPES "+str(n_tetra)+"\n")
+    for cell in range(0, n_tetra):
+        f.write("10\n")
+
+    f.write("\n")
+    f.write("CELL_DATA "+str(n_tetra)+"\n")
+    f.write("SCALARS Q_process"+str(1)+"_ion_"+str(1)+"_grid_subset_"+str(1)+"[W/m^3] float 1\n")
+    f.write("LOOKUP_TABLE default\n")
+    for val in tetra_val:
+        f.write(str(val)+"\n")
+ 
+print("tetrahedra done")
+#############################
+
+
 
 # Convert quadrangles into triangles (Discrete2DMesh takes triangles
 # and triangle values)
