@@ -26,9 +26,9 @@ def main():
     device     = "di_SPI"
     shot_list  = [111111]
     run        = 1
-    N_phi      = 32     # Number of toroidal points for 3D mesh
-    N_passes   = 10     # Number of camera render passes in RaySect
-    N_pixel    = 10     # Number of pixel samples
+    N_phi      = 64     # Number of toroidal points for 3D mesh
+    N_passes   = 1000     # Number of camera render passes in RaySect
+    N_pixel    = 100    # Number of pixel samples
     
     # Some hardcoded parameters
     N_vertex   = 4      # Number of vertices of each poloidal element
@@ -107,9 +107,55 @@ def main():
             # Go over elements and form prisms and tetrahedra
             logging.info("Computing 3D tetrahedra mesh...")
             i_tetra = -1
+
+            sg = np.array( [0.0694318442029735, 0.3300094782075720, 0.6699905217924280, 0.9305681557970265] )   # Positions of Gaussian points
+            wg = np.array( [0.173927422568727,  0.326072577431273,   0.326072577431273,  0.173927422568727] )   # Weights of Gaussian points
+
+            ngauss = 4
+            n_dof  = element_list.n_dof   
+            n_vertex  = element_list.n_vertex
+            n_tor  = len( val_coeff[:,0] )
+            xjac   = np.zeros( shape=(ngauss,ngauss) )
+            Rg     = np.zeros( shape=(ngauss,ngauss) )
+            coeff  = np.zeros( shape=( n_vertex, n_dof, n_tor  ) )
+            coeff_R  = np.zeros( shape=( n_vertex, n_dof ) )
+            coeff_Z  = np.zeros( shape=( n_vertex, n_dof ) )
+
+            basis_gauss = np.zeros( shape=(ngauss,ngauss,n_vertex,n_dof) ) 
+            basis_tor_all = np.zeros( shape=(N_phi,n_tor) ) 
+            for ig in range(ngauss):
+                for jg in range(ngauss):
+                    basis_gauss[ig,jg] = basis_functions(sg[ig], sg[jg]) 
+
+
+            for i_phi in range(0,N_phi):
             
+                phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
+                basis_tor_all[i_phi] = toroidal_basis(n_tor, node_list.n_period, phi_mid, False)
+           
             for i_elm in range(0, N_elm):
-            
+
+                sizes    = element_list.elems[i_elm].size
+
+                for kv in range(0, element_list.n_vertex):  
+                    iv             = element_list.elems[i_elm].vertex_ind[kv] - 1
+                    coeff_R[kv,:]  = node_list.nodes[iv].x[:,0] * sizes[kv,:] 
+                    coeff_Z[kv,:]  = node_list.nodes[iv].x[:,1] * sizes[kv,:]
+
+                    for idof in range(0, n_dof):
+                        icoeff            =  iv + idof*node_list.n_nodes 
+                        coeff[kv,idof,:]  =  val_coeff[:,icoeff]
+
+                vol = 0
+                for ig in range(ngauss):
+                    for jg in range(ngauss):
+
+                        out          = interp_RZ_fast(sg[ig], sg[jg], coeff_R, coeff_Z)
+                        Rg[ig,jg]    = out[0]
+                        xjac[ig,jg]  = out[1]*out[5] - out[2]*out[4]
+                        vol          = vol +  wg[ig]*wg[jg] * Rg[ig,jg]*xjac[ig,jg]
+
+           
                 # Go toroidally
                 for i_phi in range(0,N_phi):
             
@@ -135,9 +181,19 @@ def main():
                     T2_ind = i_phiT*N_pol_nodes + i2
                     T3_ind = i_phiT*N_pol_nodes + i3
             
-                    # Emissivity value at prism center
-                    phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
-                    val     = interp_val(val_coeff, node_list, element_list, i_elm, 0.5, 0.5, phi_mid)
+                    # Integrate over the element and make an average
+                    val = 0.0
+                
+                    for ig in range(ngauss):
+                        for jg in range(ngauss):
+                
+                            val = val + np.einsum('ijk,ij,ij,k->', coeff, sizes, basis_gauss[ig,jg], basis_tor_all[i_phi] ) * wg[ig]*wg[jg] * Rg[ig,jg]*xjac[ig,jg]
+
+
+                    val = val / vol
+
+                   # phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
+                   # print(val, interp_val(val_coeff, node_list, element_list, i_elm, 0.5, 0.5, phi_mid) )
             
                     # Define the 5 tetrahedra and their indices
                     # See https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/48509/versions/3/previews/COMP_GEOM_TLBX/html/Divide_hypercube_5_simplices_3D.html
@@ -269,7 +325,7 @@ def main():
             triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error}
             
             # Define output name and export result
-            output_basename = "bolometer_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)+".vtk"
+            output_basename = "bolometer_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
             export_vtk(bolometer1801, output_basename + '.vtk', triangle_data=triangle_data)
 
 
