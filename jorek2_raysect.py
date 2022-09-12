@@ -12,7 +12,7 @@ from raysect.core.math.function.float.function3d.interpolate import Discrete3DMe
 import imas
 import logging
 
-# Function to transfer from cylindrical to cartesian coordinates
+# Function to transform cylindrical to cartesian coordinates
 def to_cart_coord(R,Z,phi):
     x =  R * np.cos(phi)
     y = -R * np.sin(phi)
@@ -27,8 +27,9 @@ def main():
     shot_list  = [111111]
     run        = 1
     N_phi      = 64     # Number of toroidal points for 3D mesh
-    N_passes   = 1000     # Number of camera render passes in RaySect
-    N_pixel    = 100    # Number of pixel samples
+    N_passes   = 30     # Number of camera render passes in RaySect
+    N_pixel    = 300    # Number of pixel samples
+    rot_plasma = -2.8   # Rotates the plasma by this angle 
     
     # Some hardcoded parameters
     N_vertex   = 4      # Number of vertices of each poloidal element
@@ -85,7 +86,7 @@ def main():
             # Go toroidally
             for i_phi in range(0,N_phi):
         
-                phi         = float(i_phi) / float(N_phi) * 2.0*np.pi   # Toroidal angle of node 
+                phi         = float(i_phi) / float(N_phi) * 2.0*np.pi + rot_plasma  # Toroidal angle of node 
                 i_node_glob = i_phi * N_pol_nodes + i_pol_node          # Global 3D index of node
         
                 nodes_xyz[i_node_glob] = to_cart_coord( Rnode, Znode, phi )
@@ -130,7 +131,7 @@ def main():
 
             for i_phi in range(0,N_phi):
             
-                phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
+                phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi  
                 basis_tor_all[i_phi] = toroidal_basis(n_tor, node_list.n_period, phi_mid, False)
            
             for i_elm in range(0, N_elm):
@@ -192,7 +193,7 @@ def main():
 
                     val = val / vol
 
-                   # phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi 
+                   # phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi  
                    # print(val, interp_val(val_coeff, node_list, element_list, i_elm, 0.5, 0.5, phi_mid) )
             
                     # Define the 5 tetrahedra and their indices
@@ -289,7 +290,7 @@ def main():
             emitter.material = radiation_emitter
             
             # Import vtk mesh (here bolometer housing as example)
-            bolometer1801 = import_vtk("./simplified_bolometer_dense_mesh.vtk",
+            bolometer1801 = import_vtk("./FWP8_18.vtk",
                                       scaling=0.001, parent=world)
             bolometer1801.material = AbsorbingSurface()
             
@@ -325,7 +326,7 @@ def main():
             triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error}
             
             # Define output name and export result
-            output_basename = "bolometer_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
+            output_basename = "FW8_18_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
             export_vtk(bolometer1801, output_basename + '.vtk', triangle_data=triangle_data)
 
 
