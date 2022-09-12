@@ -11,6 +11,7 @@ from raysect.primitive import Cylinder, Subtract
 from raysect.core.math.function.float.function3d.interpolate import Discrete3DMesh
 import imas
 import logging
+import time
 
 # Function to transform cylindrical to cartesian coordinates
 def to_cart_coord(R,Z,phi):
@@ -105,37 +106,29 @@ def main():
                 logging.exception("Error reading radiation coefficients for time slice  "+str(i_time)+":")
                 continue  # Skip this shot
 
+
+            # Quantities needed for integration over elements
+            n_dof    = element_list.n_dof   
+            n_vertex = element_list.n_vertex
+            n_tor    = len( val_coeff[:,0] )
+
+            dV_gauss = np.zeros( shape=( ngauss,   ngauss) ) # volume element at gaussian points
+            coeff    = np.zeros( shape=( n_vertex, n_dof, n_tor  ) )
+            coeff_R  = np.zeros( shape=( n_vertex, n_dof ) )
+            coeff_Z  = np.zeros( shape=( n_vertex, n_dof ) )
+            val      = np.zeros(N_phi)
+
+            # Get poloidal and toroidal basis at integration points
+            basis_gauss   = get_basis_at_gaussian(n_vertex,n_dof)
+            basis_tor_all = get_toroidal_basis(N_phi, n_tor, node_list.n_period)
+ 
             # Go over elements and form prisms and tetrahedra
             logging.info("Computing 3D tetrahedra mesh...")
             i_tetra = -1
-
-            sg = np.array( [0.0694318442029735, 0.3300094782075720, 0.6699905217924280, 0.9305681557970265] )   # Positions of Gaussian points
-            wg = np.array( [0.173927422568727,  0.326072577431273,   0.326072577431273,  0.173927422568727] )   # Weights of Gaussian points
-
-            ngauss = 4
-            n_dof  = element_list.n_dof   
-            n_vertex  = element_list.n_vertex
-            n_tor  = len( val_coeff[:,0] )
-            xjac   = np.zeros( shape=(ngauss,ngauss) )
-            Rg     = np.zeros( shape=(ngauss,ngauss) )
-            coeff  = np.zeros( shape=( n_vertex, n_dof, n_tor  ) )
-            coeff_R  = np.zeros( shape=( n_vertex, n_dof ) )
-            coeff_Z  = np.zeros( shape=( n_vertex, n_dof ) )
-
-            basis_gauss = np.zeros( shape=(ngauss,ngauss,n_vertex,n_dof) ) 
-            basis_tor_all = np.zeros( shape=(N_phi,n_tor) ) 
-            for ig in range(ngauss):
-                for jg in range(ngauss):
-                    basis_gauss[ig,jg] = basis_functions(sg[ig], sg[jg]) 
-
-
-            for i_phi in range(0,N_phi):
-            
-                phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi  
-                basis_tor_all[i_phi] = toroidal_basis(n_tor, node_list.n_period, phi_mid, False)
-           
+            t_start = time.time()        
             for i_elm in range(0, N_elm):
 
+                ######################### Find average emissitivity by integrating the element ######################### 
                 sizes    = element_list.elems[i_elm].size
 
                 for kv in range(0, element_list.n_vertex):  
@@ -147,17 +140,19 @@ def main():
                         icoeff            =  iv + idof*node_list.n_nodes 
                         coeff[kv,idof,:]  =  val_coeff[:,icoeff]
 
-                vol = 0
-                for ig in range(ngauss):
-                    for jg in range(ngauss):
+                # Integrate over the element to calculate average emissivity
+                vol = 0.0;  val = 0.0;
+                for ms in range(ngauss):
+                    for mt in range(ngauss):
+                        out             = interp_RZ_fast(sg[ms], sg[mt], coeff_R, coeff_Z)      # Get R, Z and derivatives for Jacobian
+                        dV_gauss[ms,mt] = (out[1]*out[5] - out[2]*out[4])*out[0]*wg[ms]*wg[mt]  # Jacobian*R*gauss_wemshts
+                        vol             = vol + dV_gauss[ms,mt] 
+                        val = val + np.einsum('ijk,ij,ij,lk->l', coeff, sizes, basis_gauss[ms,mt], basis_tor_all) * dV_gauss[ms,mt]
 
-                        out          = interp_RZ_fast(sg[ig], sg[jg], coeff_R, coeff_Z)
-                        Rg[ig,jg]    = out[0]
-                        xjac[ig,jg]  = out[1]*out[5] - out[2]*out[4]
-                        vol          = vol +  wg[ig]*wg[jg] * Rg[ig,jg]*xjac[ig,jg]
+                val = val / vol          
+                ######################### End finding average emissitivity ############################################# 
 
-           
-                # Go toroidally
+                # Go toroidally to form tetrahedra
                 for i_phi in range(0,N_phi):
             
                     # Global node indices
@@ -182,46 +177,32 @@ def main():
                     T2_ind = i_phiT*N_pol_nodes + i2
                     T3_ind = i_phiT*N_pol_nodes + i3
             
-                    # Integrate over the element and make an average
-                    val = 0.0
-                
-                    for ig in range(ngauss):
-                        for jg in range(ngauss):
-                
-                            val = val + np.einsum('ijk,ij,ij,k->', coeff, sizes, basis_gauss[ig,jg], basis_tor_all[i_phi] ) * wg[ig]*wg[jg] * Rg[ig,jg]*xjac[ig,jg]
-
-
-                    val = val / vol
-
-                   # phi_mid = 0.5 * ( float(i_phi)/float(N_phi) + float(i_phi+1)/float(N_phi) ) * 2.0 * np.pi  
-                   # print(val, interp_val(val_coeff, node_list, element_list, i_elm, 0.5, 0.5, phi_mid) )
-            
                     # Define the 5 tetrahedra and their indices
                     # See https://www.mathworks.com/matlabcentral/mlc-downloads/downloads/submissions/48509/versions/3/previews/COMP_GEOM_TLBX/html/Divide_hypercube_5_simplices_3D.html
                     # Tetrahedron 0 = 3,1,0,0'
                     i_tetra            = i_tetra + 1 
                     tetra_ind[i_tetra] = [B3_ind, B1_ind, B0_ind, T0_ind]     
-                    tetra_val[i_tetra] = val  
+                    tetra_val[i_tetra] = val[i_phi]  
             
                     # Tetrahedron 1 = 3,1,2,2'
                     i_tetra            = i_tetra + 1 
                     tetra_ind[i_tetra] = [B3_ind, B1_ind, B2_ind, T2_ind]    
-                    tetra_val[i_tetra] = val  
+                    tetra_val[i_tetra] = val[i_phi]  
             
                     # Tetrahedron 2 = 3,3',0',2'
                     i_tetra            = i_tetra + 1 
                     tetra_ind[i_tetra] = [B3_ind, T3_ind, T0_ind, T2_ind]     
-                    tetra_val[i_tetra] = val  
+                    tetra_val[i_tetra] = val[i_phi]  
             
                     # Tetrahedron 3 = 0',1,1',2'
                     i_tetra            = i_tetra + 1 
                     tetra_ind[i_tetra] = [T0_ind, B1_ind, T1_ind, T2_ind]     
-                    tetra_val[i_tetra] = val  
+                    tetra_val[i_tetra] = val[i_phi]  
             
                     # Tetrahedron 4 = 3, 1, 2', 0'
                     i_tetra            = i_tetra + 1 
                     tetra_ind[i_tetra] =  [B3_ind, B1_ind, T2_ind, T0_ind]     
-                    tetra_val[i_tetra] = val  
+                    tetra_val[i_tetra] = val[i_phi]  
            
          
             # Export 3D radiation to VTK 
@@ -257,7 +238,8 @@ def main():
                 for val in tetra_val:
                     f.write(str(val)+"\n")
              
-            logging.info("tetrahedra done")
+            t_end = time.time()        
+            logging.info("Time to compute tetrahedra and values = "+str(t_end-t_start))
             #############################
             
             
@@ -270,8 +252,11 @@ def main():
             
             # Create 3D interpolation function in Raysect
             logging.info('Creating 3D interpolation function...')
+            t_start = time.time()        
             radiation_interp = Discrete3DMesh(nodes_xyz, tetra_ind, tetra_val,
                                               limit=False, default_value=0)
+            t_end = time.time()        
+            logging.info("Time to compute 3D interpolation function = "+str(t_end-t_start))
             
             logging.info('Start RaySect...')
             radiation_emitter = VolumeTransform(RadiationFunction(radiation_interp))
