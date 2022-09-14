@@ -25,11 +25,11 @@ def main():
     # Input parameters
     username   = "artolaj"
     device     = "di_SPI"
-    shot_list  = [111111]
+    shot_list  = [111112]
     run        = 1
     N_phi      = 64     # Number of toroidal points for 3D mesh
-    N_passes   = 30     # Number of camera render passes in RaySect
-    N_pixel    = 300    # Number of pixel samples
+    N_passes   = 60   # Number of camera render passes in RaySect
+    N_pixel    = 1000  # Number of pixel samples
     rot_plasma = -2.8   # Rotates the plasma by this angle 
     
     # Some hardcoded parameters
@@ -98,7 +98,8 @@ def main():
 
         for i_time in range(0, N_times):
 
-            logging.info('Time  = ' + str(x.radiation.time[i_time]) + ' s ')
+            time_now = x.radiation.time[i_time]
+            logging.info('Time  = ' + str(time_now) + ' s ')
 
             try:
                 val_coeff     = x.radiation.process[0].ggd.array[i_time].ion[0].emissivity.array[0].coefficients
@@ -212,6 +213,11 @@ def main():
                 f.write("ASCII\n")
                 f.write("\n")
                 f.write("DATASET UNSTRUCTURED_GRID\n")
+                f.write("\n")
+                f.write("FIELD FieldData 1\n")
+                f.write("TIME 1 1 double\n")
+                f.write(str(time_now)+"\n")
+                f.write("\n")
                 f.write("POINTS "+str(n_tetra_nodes)+" float\n")
                 for node in nodes_xyz:
                     f.write(str(node[0])+" "+str(node[1])+" "+str(node[2])+" \n") 
