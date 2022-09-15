@@ -1,0 +1,10 @@
+namelist input
+si-units
+set nsub_bnd 16
+for step 0 do
+  expressions theta_geo R Z phi Psi_N B_abs Btor Btheta Bnorm Jnorm heatF_total q_parallel R_bnd Z_bnd R_axis t
+  boundary_quantities 0 6.28 32 
+  set linepoints 200
+  midplane
+done
+

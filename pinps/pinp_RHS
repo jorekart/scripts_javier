@@ -1,0 +1,6 @@
+namelist input
+set nsub_vtk 4
+set vtk_phi_value 3.14
+for step 200 to 240 do
+RHS_terms_vtk 1
+done

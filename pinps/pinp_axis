@@ -1,0 +1,6 @@
+namelist input
+si-units
+for step 0 to 99999 do
+expressions t Te ne currdens
+point_axis
+done

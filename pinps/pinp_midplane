@@ -1,0 +1,7 @@
+namelist input
+si-units
+set linepoints 200
+for step 0 do
+  expressions R Te ne currdens 
+  midplane 
+done

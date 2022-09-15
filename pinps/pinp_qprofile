@@ -1,0 +1,5 @@
+namelist input
+si-units
+for step 0 to 8000 do
+qprofile
+done
