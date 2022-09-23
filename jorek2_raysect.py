@@ -23,15 +23,27 @@ def to_cart_coord(R,Z,phi):
 def main():
 
     # Input parameters
-    username   = "artolaj"
-    device     = "di_SPI"
-    shot_list  = [111112]
-    run        = 1
-    N_phi      = 64     # Number of toroidal points for 3D mesh
-    N_passes   = 60   # Number of camera render passes in RaySect
-    N_pixel    = 1000  # Number of pixel samples
-    rot_plasma = -2.8   # Rotates the plasma by this angle 
-    
+    username    = "artolaj"
+    device      = "di_SPI"
+    shot_list   = [111112]
+    run         = 1
+    N_phi       = 64     # Number of toroidal points for 3D mesh
+    N_passes    = 30     # Number of camera render passes in RaySect
+    N_pixel     = 300    # Number of pixel samples
+    rot_plasma  = -2.8   # Rotates the plasma by this angle 
+    vtk_surface = "./FWP8_18.vtk"  # Surface where radiation is calculated
+    scale_vtk   = 0.001            # 0.001 for FW pannels
+    flip_norm   = False            # Flips normals
+
+    # Inputs for energy conservation check (< 0.5% relative error)
+    #N_phi       = 64     # Number of toroidal points for 3D mesh
+    #N_passes    = 30   # Number of camera render passes in RaySect
+    #N_pixel     = 3000 # Number of pixel samples
+    #rot_plasma  = -2.8   # Rotates the plasma by this angle 
+    #vtk_surface = "./observer_torus.vtk"  # Surface where radiation is calculated
+    #scale_vtk   = 1.16  # 0.001 for FW pannels, 1.16 for torus observer
+    #flip_norm   = True  # Flips normals
+   
     # Some hardcoded parameters
     N_vertex   = 4      # Number of vertices of each poloidal element
     N_loc_tet  = 5      # Every rectangular prism is divided into 5 tetrahedra 
@@ -281,8 +293,7 @@ def main():
             emitter.material = radiation_emitter
             
             # Import vtk mesh (here bolometer housing as example)
-            bolometer1801 = import_vtk("./FWP8_18.vtk",
-                                      scaling=0.001, parent=world)
+            bolometer1801 = import_vtk(vtk_surface, scaling=scale_vtk, parent=world, flip_normals=flip_norm)
             bolometer1801.material = AbsorbingSurface()
             
             # Define Raysect power pipeline
@@ -317,7 +328,7 @@ def main():
             triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error}
             
             # Define output name and export result
-            output_basename = "FW8_18_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
+            output_basename = "rad_power_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
             export_vtk(bolometer1801, output_basename + '.vtk', triangle_data=triangle_data)
 
 
