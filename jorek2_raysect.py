@@ -29,12 +29,14 @@ def main():
     shot_list    = [111112]
     run          = 1
     N_phi        = 64    # Number of toroidal points for 3D mesh
-    N_passes     = 60    # Number of camera render passes in RaySect
-    N_pixel      = 1000  # Number of pixel samples
+    N_passes     = 2    # Number of camera render passes in RaySect
+    N_pixel      = 10  # Number of rays per triangle
     rot_plasma   = 0     # Rotates the plasma by this angle 
     surface_file = "../Sector1.stl"  # Surface where radiation is calculated
-    scale_vtk    = 0.001            # 0.001 for FW pannels
-    flip_norm    = False            # Flips normals
+    scale_wall   = 0.001            # 0.001 for FW pannels, scaling factor for wall
+    export_p_vtk = True             # Print or not the plasma vtks
+    flip_norm    = False            # Flips normals of wall triangles
+    torus_surf   = 700              # Full torus surface for peaking factor [m^2]
 
     # Inputs for energy conservation check (< 0.5% relative error)
     #N_phi       = 64     # Number of toroidal points for 3D mesh
@@ -42,7 +44,7 @@ def main():
     #N_pixel     = 3000 # Number of pixel samples
     #rot_plasma  = -2.8   # Rotates the plasma by this angle 
     #surface_file= "./observer_torus.vtk"  # Surface where radiation is calculated
-    #scale_vtk   = 1.16  # 0.001 for FW pannels, 1.16 for torus observer
+    #scale_wall   = 1.16  # 0.001 for FW pannels, 1.16 for torus observer
     #flip_norm   = True  # Flips normals
    
     # Some hardcoded parameters
@@ -58,7 +60,7 @@ def main():
         f_format = "vtk"
         fname    = re.search('/(.*).vtk', surface_file).group(1)
     else:
-        print( "File format for surface not known!")
+        logging.error( "File format for surface not known!")
         exit()
     
     logging.basicConfig(level=logging.DEBUG, filename='./output.log')
@@ -151,6 +153,8 @@ def main():
             logging.info("Computing 3D tetrahedra mesh...")
             i_tetra = -1
             t_start = time.time()        
+            tot_rad = 0.0
+
             for i_elm in range(0, N_elm):
 
                 ######################### Find average emissitivity by integrating the element ######################### 
@@ -174,7 +178,8 @@ def main():
                         vol             = vol + dV_gauss[ms,mt] 
                         val = val + np.einsum('ijk,ij,ij,lk->l', coeff, sizes, basis_gauss[ms,mt], basis_tor_all) * dV_gauss[ms,mt]
 
-                val = val / vol          
+                tot_rad = tot_rad + sum(val)*2*np.pi/float(N_phi)
+                val     = val / vol          
                 ######################### End finding average emissitivity ############################################# 
 
                 # Go toroidally to form tetrahedra
@@ -229,44 +234,46 @@ def main():
                     tetra_ind[i_tetra] =  [B3_ind, B1_ind, T2_ind, T0_ind]     
                     tetra_val[i_tetra] = val[i_phi]  
            
-         
             # Export 3D radiation to VTK 
-            with open("jorek3d_radiation_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)+".vtk", "w") as f:
-                f.write("# vtk DataFile Version 2.0\n")
-                f.write("vtk output\n")
-                f.write("ASCII\n")
-                f.write("\n")
-                f.write("DATASET UNSTRUCTURED_GRID\n")
-                f.write("\n")
-                f.write("FIELD FieldData 1\n")
-                f.write("TIME 1 1 double\n")
-                f.write(str(time_now)+"\n")
-                f.write("\n")
-                f.write("POINTS "+str(n_tetra_nodes)+" float\n")
-                for node in nodes_xyz:
-                    f.write(str(node[0])+" "+str(node[1])+" "+str(node[2])+" \n") 
-            
-                f.write("\n")
-                f.write("CELLS "+str(n_tetra)+" "+str(n_tetra*5)+"\n")
-            
-                for tetra in tetra_ind:
-                    f.write("4 "+str(tetra[0])+" "+
-                             str(tetra[1])+" "+
-                             str(tetra[2])+" "+
-                             str(tetra[3])+"\n")
-            
-                f.write("\n")
-            
-                f.write("CELL_TYPES "+str(n_tetra)+"\n")
-                for cell in range(0, n_tetra):
-                    f.write("10\n")
-            
-                f.write("\n")
-                f.write("CELL_DATA "+str(n_tetra)+"\n")
-                f.write("SCALARS Radiation[W/m^3] float 1\n")
-                f.write("LOOKUP_TABLE default\n")
-                for val in tetra_val:
-                    f.write(str(val)+"\n")
+            if export_p_vtk:
+                with open("jorek3d_radiation_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)+".vtk", "w") as f:
+                    f.write("# vtk DataFile Version 2.0\n")
+                    f.write("vtk output\n")
+                    f.write("ASCII\n")
+                    f.write("\n")
+                    f.write("DATASET UNSTRUCTURED_GRID\n")
+                    f.write("\n")
+                    f.write("FIELD FieldData 2\n")
+                    f.write("TIME 1 1 double\n")
+                    f.write(str(time_now)+"\n")
+                    f.write("tot_rad 1 1 double\n")
+                    f.write(str(tot_rad)+"\n")
+                    f.write("\n")
+                    f.write("POINTS "+str(n_tetra_nodes)+" float\n")
+                    for node in nodes_xyz:
+                        f.write(str(node[0])+" "+str(node[1])+" "+str(node[2])+" \n") 
+                
+                    f.write("\n")
+                    f.write("CELLS "+str(n_tetra)+" "+str(n_tetra*5)+"\n")
+                
+                    for tetra in tetra_ind:
+                        f.write("4 "+str(tetra[0])+" "+
+                                 str(tetra[1])+" "+
+                                 str(tetra[2])+" "+
+                                 str(tetra[3])+"\n")
+                
+                    f.write("\n")
+                
+                    f.write("CELL_TYPES "+str(n_tetra)+"\n")
+                    for cell in range(0, n_tetra):
+                        f.write("10\n")
+                
+                    f.write("\n")
+                    f.write("CELL_DATA "+str(n_tetra)+"\n")
+                    f.write("SCALARS Radiation[W/m^3] float 1\n")
+                    f.write("LOOKUP_TABLE default\n")
+                    for val in tetra_val:
+                        f.write(str(val)+"\n")
              
             t_end = time.time()        
             logging.info("Time to compute tetrahedra and values = "+str(t_end-t_start))
@@ -306,9 +313,9 @@ def main():
             
             # Import vtk mesh (here bolometer housing as example)
             if f_format == "vtk":
-                bolometer1801 = import_vtk(surface_file, scaling=scale_vtk, parent=world, flip_normals=flip_norm)
+                bolometer1801 = import_vtk(surface_file, scaling=scale_wall, parent=world, flip_normals=flip_norm)
             elif f_format == "stl":
-                bolometer1801 = import_stl(surface_file, scaling=scale_vtk, parent=world, flip_normals=flip_norm)
+                bolometer1801 = import_stl(surface_file, scaling=scale_wall, parent=world, flip_normals=flip_norm)
             else:
                 logging.info("Unknown format for surface file")
     
@@ -344,7 +351,7 @@ def main():
             frame = camera.pipelines[0].frame
             power_density = frame.mean / camera.collection_areas
             error = frame.errors() / camera.collection_areas
-            triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error}
+            triangle_data = {'PowerDensity': power_density, 'PowerDensityError': error, 'PeakingFactor': power_density/ (tot_rad/torus_surf) }
             
             # Define output name and export result
             output_basename = "rad_power_" + fname +"_shot"+str(shot)+"_run"+str(run)+"_timeslice_"+str(i_time)
