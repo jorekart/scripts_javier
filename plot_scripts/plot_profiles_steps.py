@@ -207,7 +207,7 @@ for i in range(0,nplot):
             f.write("set xlabel 'R (m)'" + "\n")
 
     if (prof_list[i].label == 'q-profile'):        
-        f.write("plot for [i=1:ntimes] 'toplot/qprof'.i.'.dat' u 2:($"+str(3)+"*"+str(prof_list[i].fact)+") w l\n")
+        f.write("plot for [i=1:ntimes] 'toplot/qprof'.i.'.dat' u 1:($"+str(2)+"*"+str(prof_list[i].fact)+") w l\n")
     else:
         if midplane: 
             f.write("plot for [i=1:ntimes] 'toplot/midplane'.i.'.dat' u 2:($"+str(i+3)+"*"+str(prof_list[i].fact)+") w l\n")
