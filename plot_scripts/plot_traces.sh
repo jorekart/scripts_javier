@@ -5,20 +5,28 @@
 # Use -cs to re-compute separatrices
 # Use -s to plot steps instead to time
 # Use -t to obtain restart indexes from equally spaced times
+# slow font initialization in some systems, load twice gnu_script2
+
+# Instructions
+#   1. Set all input params below correctly
+#   2. Compute the 0D files (./plot_traces.sh -c0)
+#   3. Set separatrices times (./plot_traces.sh -t)
+#   4. Compute separatrices (./plot_traces.sh -cs)
+#   5. Plot all (./plot_traces.sh )
 
 # Input params 
-postproc="/home/ITER/artolaj/git.jorek2/jorek2_postproc_600_303_ntor1"
-sep_times_ex="/home/ITER/artolaj/scripts/set_sep_times.py"
-n_seps=8               # number of separatrices
-input="input"
+postproc="./jorek2_postproc"
+sep_times_ex="/home/artolaj/scripts_javier/set_sep_times.py"
+n_seps=5              # number of separatrices
+input="input_fake"
 
 # Default settings
 #zeroDfile="0D.dat"
 zeroDfile="postproc/zeroD_quantities_s00000..99999.dat"
-Ip_col=63
-Ihalo_col=65
+Ip_col=65
+Ihalo_col=67
 Zaxis_col=5
-q95_col=74
+q95_col=76
 li_col=17 #66
 
 label_font=14
@@ -51,7 +59,7 @@ if [ "$1" == "-c0" ]; then
 
    echo "namelist ${input}" >> pinp_sep
    echo "si-units" >> pinp_sep
-   echo "for step 0 to 99999 do" >> pinp_sep
+   echo "for step 0 to 99999 by 100 do" >> pinp_sep
    echo "zeroD_quantities" >> pinp_sep
    echo "done" >> pinp_sep
    $postproc < pinp_sep
@@ -124,7 +132,7 @@ echo "set key" >> gnu_script2
 if [ "$1" == "-s" ]; then
   echo "p 'toplot2/0D.dat' u 2:(\$ $Ip_col*1e-6) lc 'black' t 'Ip', '' u 2:(\$ $Ihalo_col*1e-6) lc 'red' t 'Ihalo'" >> gnu_script2 
 else
-  echo "p 'toplot2/0D.dat' u (\$1*1e3):(\$ $Ip_col*1e-6) w l lc 'black' t 'Ip', '' u (\$1*1e3):(\$ $Ihalo_col*1e-6) w l lc 'red' t 'Ihalo'" >> gnu_script2 
+  echo "p 'toplot2/0D.dat' u (\$ 1*1e3):(\$ $Ip_col*1e-6) w l lc 'black' t 'Ip', '' u (\$ 1*1e3):(\$ $Ihalo_col*1e-6) w l lc 'red' t 'Ihalo'" >> gnu_script2 
 fi
 
 echo "" >> gnu_script2 
@@ -139,7 +147,7 @@ echo "set ylabel 'Z_{axis} (m)' font 'Times-Roman,$label_font'" >> gnu_script2
 if [ "$1" == "-s" ]; then
   echo "p 'toplot2/0D.dat' u 2:(\$ $Zaxis_col) lc 'black'" >> gnu_script2 
 else
-  echo "p 'toplot2/0D.dat' u (\$1*1e3):(\$ $Zaxis_col) w l lc 'black'" >> gnu_script2 
+  echo "p 'toplot2/0D.dat' u (\$ 1*1e3):(\$ $Zaxis_col) w l lc 'black'" >> gnu_script2 
 fi
 
 echo "" >> gnu_script2 
@@ -152,7 +160,7 @@ echo "set ylabel 'q_{95}' font 'Times-Roman,$label_font' " >> gnu_script2
 if [ "$1" == "-s" ]; then
   echo "p 'toplot2/0D.dat' u 2:(\$ $q95_col) lc 'black'" >> gnu_script2 
 else
-  echo "p 'toplot2/0D.dat' u (\$1*1e3):(\$ $q95_col) w l lc 'black'" >> gnu_script2 
+  echo "p 'toplot2/0D.dat' u (\$ 1*1e3):(\$ $q95_col) w l lc 'black'" >> gnu_script2 
 fi
 
 
@@ -169,7 +177,7 @@ if [ "$1" == "-s" ]; then
   echo "p 'toplot2/0D.dat' u 2:(\$ $li_col * $fact_li) lc 'black'" >> gnu_script2 
 else
   echo "set xlabel 'Time (ms)' font 'Times-Roman,$label_font'" >> gnu_script2 
-  echo "p 'toplot2/0D.dat' u (\$1*1e3):(\$ $li_col * $fact_li) w l lc 'black'" >> gnu_script2 
+  echo "p 'toplot2/0D.dat' u (\$ 1*1e3):(\$ $li_col * $fact_li) w l lc 'black'" >> gnu_script2 
 fi
 
 echo "">> gnu_script2 
