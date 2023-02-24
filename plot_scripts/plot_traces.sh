@@ -9,24 +9,21 @@
 
 # Instructions
 #   1. Set all input params below correctly
-#   2. Compute the 0D files (./plot_traces.sh -c0)
-#   3. Set separatrices times (./plot_traces.sh -t)
-#   4. Compute separatrices (./plot_traces.sh -cs)
-#   5. Plot all (./plot_traces.sh )
+#   2. Compute everything and plot (./plot_traces.sh -all)
+#   3. Just plot (./plot_traces.sh )
 
 # Input params 
-postproc="./jorek2_postproc"
-sep_times_ex="/home/artolaj/scripts_javier/set_sep_times.py"
+postproc="../jorek2_postproc_ntor1"
+sep_times_ex="/home/ITER/artolaj/scripts_hub/scripts_javier/set_sep_times.py"
 n_seps=5              # number of separatrices
-input="input_fake"
+input="input"
 
 # Default settings
-#zeroDfile="0D.dat"
 zeroDfile="postproc/zeroD_quantities_s00000..99999.dat"
-Ip_col=65
-Ihalo_col=67
+Ip_col=63
+Ihalo_col=65
 Zaxis_col=5
-q95_col=76
+q95_col=74
 li_col=17 #66
 
 label_font=14
@@ -34,7 +31,7 @@ li_lab="W_{th} (MJ)"  #"li_3"
 fact_li=1.e-6
 
 # Calculate indices from space times (from initial 0D file)
-if [ "$1" == "-t" ]; then
+if [ "$1" == "-all" ]; then
   python $sep_times_ex $zeroDfile $n_seps 
 fi
 
@@ -55,7 +52,7 @@ len2=$((len-1))
 
 
 ####### Call postproc ###############################
-if [ "$1" == "-c0" ]; then
+if [ "$1" == "-all" ]; then
 
    echo "namelist ${input}" >> pinp_sep
    echo "si-units" >> pinp_sep
@@ -76,7 +73,7 @@ if [ "$1" == "-c0" ]; then
    
 fi
 
-if [ "$1" == "-cs" ]; then
+if [ "$1" == "-all" ]; then
 
    # create postproc input file
    for i in $(seq 0 $len2)
@@ -105,7 +102,7 @@ rm gnu_script2
 
 # Do gnuplot script
 echo "reset" >> gnu_script2 
-echo "set term qt" >> gnu_script2 
+#echo "set term qt" >> gnu_script2 
 echo " "
 echo "set size 1,1" >> gnu_script2 
 echo "set multiplot " >> gnu_script2  
