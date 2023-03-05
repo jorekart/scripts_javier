@@ -49,9 +49,19 @@ f2.close()
 # postproc command
 run_postproc = args.p_file + " < " + "pinp_0D > output_postproc \n"
 
+# Put last restart file into README
+run_last_restart = "python "+dir_scripts+"print_last_restart_in_0D.py -zD " + dir_out+"/0D.dat -Rf "+dir_out+"/README "
+
+# Get magnetic energies
+run_get_magnetic = dir_scripts+"extract_live_data.sh magnetic_energies magnetic_energies.dat \n\
+factor=\`"+ dir_scripts + "extract_live_data.sh times_y2si\` \n\
+python " + dir_scripts + "rescale_axis.py magnetic_energies.dat 0 \$factor \n"
+
 # cp postproc into get_traces folder
-run_cp  = "cp postproc/zeroD_quantities_s00000..99999.dat "+ dir_out + "/0D.dat \n"
-run_cp2 = "mv output_postproc "+ dir_out +"\n"
+run_cp  = "cp postproc/zeroD_quantities_s00000..99999.dat "+ dir_out + "/0D.dat \n"\
+         +"mv output_postproc "+ dir_out +"\n"\
+         +"mv magnetic_energies.dat "+ dir_out +"\n"
+
 
 # export info of running directory and time
 cwd       = os.getcwd()
@@ -62,11 +72,8 @@ f1.write( "Time of calling postproc "+ dt_string +"\n")
 f1.write( "Calling postproc from folder "+ cwd +"\n")
 f1.close()
 
-# Put last restart file into README
-run_last_restart = "python "+dir_scripts+"print_last_restart_in_0D.py -zD " + dir_out+"/0D.dat -Rf "+dir_out+"/README "
-
 # all commands together
-command =  "\""+ run_postproc + run_cp + run_cp2 + run_last_restart + "\""
+command =  "\""+ run_postproc + run_get_magnetic + run_cp + run_last_restart + "\""
 
 # create job script
 create_job = "python " +dir_scripts+"job_creator.py -t openmp -p " + args.queue + " -c " + command
