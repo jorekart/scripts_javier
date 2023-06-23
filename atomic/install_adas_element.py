@@ -1,0 +1,196 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from cherab.core.atomic import neon, hydrogen, argon, tungsten
+from cherab.openadas import OpenADAS
+from cherab.openadas.repository import populate
+from cherab.core.utility import RecursiveDict
+from cherab.core.atomic.elements import *
+from cherab.openadas.install import install_files
+from cherab.openadas import repository
+
+rates = {
+    'adf11scd': (
+        (hydrogen, 'adf11/scd12/scd12_h.dat'),
+        (helium, 'adf11/scd96/scd96_he.dat'),
+        (lithium, 'adf11/scd96/scd96_li.dat'),
+        (beryllium, 'adf11/scd96/scd96_be.dat'),
+        (boron, 'adf11/scd89/scd89_b.dat'),
+        (carbon, 'adf11/scd96/scd96_c.dat'),
+        (nitrogen, 'adf11/scd96/scd96_n.dat'),
+        (oxygen, 'adf11/scd96/scd96_o.dat'),
+        (neon, 'adf11/scd96/scd96_ne.dat'),
+        (argon, 'adf11/scd89/scd89_ar.dat'),
+        (krypton, 'adf11/scd89/scd89_kr.dat'),
+        (xenon, 'adf11/scd89/scd89_xe.dat'),
+        (tungsten, 'adf11/scd50/scd50_w.dat'),
+    ),
+    'adf11acd': (
+        (hydrogen, 'adf11/acd12/acd12_h.dat'),
+        (helium, 'adf11/acd96/acd96_he.dat'),
+        (lithium, 'adf11/acd96/acd96_li.dat'),
+        (beryllium, 'adf11/acd96/acd96_be.dat'),
+        (boron, 'adf11/acd89/acd89_b.dat'),
+        (carbon, 'adf11/acd96/acd96_c.dat'),
+        (nitrogen, 'adf11/acd96/acd96_n.dat'),
+        (oxygen, 'adf11/acd96/acd96_o.dat'),
+        (neon, 'adf11/acd96/acd96_ne.dat'),
+        (argon, 'adf11/acd89/acd89_ar.dat'),
+        (krypton, 'adf11/acd89/acd89_kr.dat'),
+        (xenon, 'adf11/acd89/acd89_xe.dat'),
+        (tungsten, 'adf11/acd50/acd50_w.dat'),
+    ),
+    'adf11ccd': (
+        # (donor_element, donor_charge, receiver_element, file_path)
+        (hydrogen, 0, hydrogen, 'adf11/ccd96/ccd96_h.dat'),
+        (hydrogen, 0, helium, 'adf11/ccd96/ccd96_he.dat'),
+        (hydrogen, 0, lithium, 'adf11/ccd89/ccd89_li.dat'),
+        (hydrogen, 0, beryllium, 'adf11/ccd89/ccd89_be.dat'),
+        (hydrogen, 0, boron, 'adf11/ccd89/ccd89_b.dat'),
+        (hydrogen, 0, carbon, 'adf11/ccd96/ccd96_c.dat'),
+        (hydrogen, 0, nitrogen, 'adf11/ccd89/ccd89_n.dat'),
+        (hydrogen, 0, oxygen, 'adf11/ccd89/ccd89_o.dat'),
+        (hydrogen, 0, neon, 'adf11/ccd89/ccd89_ne.dat'),
+        (hydrogen, 0, argon, 'adf11/ccd89/ccd89_ar.dat'),
+        (hydrogen, 0, krypton, 'adf11/ccd89/ccd89_kr.dat'),
+        (hydrogen, 0, xenon, 'adf11/ccd89/ccd89_xe.dat'),
+    ),
+    'adf11plt': (
+        (hydrogen, 'adf11/plt12/plt12_h.dat'),
+        (helium, 'adf11/plt96/plt96_he.dat'),
+        (lithium, 'adf11/plt96/plt96_li.dat'),
+        (beryllium, 'adf11/plt96/plt96_be.dat'),
+        (boron, 'adf11/plt89/plt89_b.dat'),
+        (carbon, 'adf11/plt96/plt96_c.dat'),
+        (nitrogen, 'adf11/plt96/plt96_n.dat'),
+        (oxygen,  'adf11/plt96/plt96_o.dat'),
+        (neon, 'adf11/plt96/plt96_ne.dat'),
+        (argon, 'adf11/plt40/plt40_ar.dat'),
+        (krypton, 'adf11/plt89/plt89_kr.dat'),
+        (xenon, 'adf11/plt89/plt89_xe.dat'),
+        (tungsten, 'adf11/plt50/plt50_w.dat'),
+    ),
+    'adf11prb': (
+        (hydrogen, 'adf11/prb12/prb12_h.dat'),
+        (helium, 'adf11/prb96/prb96_he.dat'),
+        (lithium, 'adf11/prb96/prb96_li.dat'),
+        (beryllium, 'adf11/prb96/prb96_be.dat'),
+        (boron, 'adf11/prb89/prb89_b.dat'),
+        (carbon, 'adf11/prb96/prb96_c.dat'),
+        (nitrogen, 'adf11/prb96/prb96_n.dat'),
+        (oxygen, 'adf11/prb96/prb96_o.dat'),
+        (neon, 'adf11/prb96/prb96_ne.dat'),
+        (argon, 'adf11/prb89/prb89_ar.dat'),
+        (krypton, 'adf11/prb89/prb89_kr.dat'),
+        (xenon, 'adf11/prb89/prb89_xe.dat'),
+        (tungsten, 'adf11/prb50/prb50_w.dat'),
+    ),
+    'adf11prc': (
+        (hydrogen, 'adf11/prc96/prc96_h.dat'),
+        (helium, 'adf11/prc96/prc96_he.dat'),
+        (lithium, 'adf11/prc89/prc89_li.dat'),
+        (beryllium, 'adf11/prc89/prc89_be.dat'),
+        (boron, 'adf11/prc89/prc89_b.dat'),
+        (carbon, 'adf11/prc96/prc96_c.dat'),
+        (nitrogen, 'adf11/prc89/prc89_n.dat'),
+        (oxygen, 'adf11/prc89/prc89_o.dat'),
+        (neon, 'adf11/prc89/prc89_ne.dat'),
+        (argon, 'adf11/prc89/prc89_ar.dat'),
+        (krypton, 'adf11/prc89/prc89_kr.dat'),
+        (xenon, 'adf11/prc89/prc89_xe.dat')
+    ),
+    'adf12': (
+        # (donor, receiver, ionisation, donor_metastable, rate file)
+        (hydrogen, 1, hydrogen,  1, 'adf12/qef93#h/qef93#h_h1.dat'),
+        (hydrogen, 1, helium,    2, "adf12/qef93#h/qef93#h_he2.dat"),
+        (hydrogen, 2, helium,    2, "adf12/qef97#h/qef97#h_en2_kvi#he2.dat"),
+        (hydrogen, 1, beryllium, 4, "adf12/qef93#h/qef93#h_be4.dat"),
+        (hydrogen, 2, beryllium, 4, "adf12/qef97#h/qef97#h_en2_kvi#be4.dat"),
+        (hydrogen, 1, boron,     5, "adf12/qef93#h/qef93#h_b5.dat"),
+        (hydrogen, 2, boron,     5, "adf12/qef97#h/qef97#h_en2_kvi#b5.dat"),
+        (hydrogen, 1, carbon,    6, "adf12/qef93#h/qef93#h_c6.dat"),
+        (hydrogen, 2, carbon,    6, "adf12/qef97#h/qef97#h_en2_kvi#c6.dat"),
+        (hydrogen, 1, neon,      10, "adf12/qef93#h/qef93#h_ne10.dat"),
+        (hydrogen, 2, neon,      10, "adf12/qef97#h/qef97#h_en2_kvi#ne10.dat")
+    ),
+    'adf15': (
+        (hydrogen,  0, 'adf15/pec12#h/pec12#h_pju#h0.dat'),
+        (helium,    0, 'adf15/pec96#he/pec96#he_pju#he0.dat'),
+        (helium,    1, 'adf15/pec96#he/pec96#he_pju#he1.dat'),
+        (beryllium, 0, 'adf15/pec96#be/pec96#be_pju#be0.dat'),
+        (beryllium, 1, 'adf15/pec96#be/pec96#be_pju#be1.dat'),
+        (beryllium, 2, 'adf15/pec96#be/pec96#be_pju#be2.dat'),
+        (beryllium, 3, 'adf15/pec96#be/pec96#be_pju#be3.dat'),
+        (carbon,    0, 'adf15/pec96#c/pec96#c_vsu#c0.dat'),
+        (carbon,    1, 'adf15/pec96#c/pec96#c_vsu#c1.dat'),
+        (carbon,    2, 'adf15/pec96#c/pec96#c_vsu#c2.dat'),
+        # (neon,      0, 'adf15/pec96#ne/pec96#ne_pju#ne0.dat'),     #TODO: OPENADAS DATA CORRUPT
+        # (neon,      1, 'adf15/pec96#ne/pec96#ne_pju#ne1.dat'),     #TODO: OPENADAS DATA CORRUPT
+        (nitrogen,  0, 'adf15/pec96#n/pec96#n_vsu#n0.dat'),
+        (nitrogen,  1, 'adf15/pec96#n/pec96#n_vsu#n1.dat'),
+        # (nitrogen,  2, 'adf15/pec96#n/pec96#n_vsu#n2.dat'),    #TODO: OPENADAS DATA CORRUPT
+    ),
+    'adf21': (
+        # (beam_species, target_ion, target_ionisation, rate file)
+        (hydrogen, hydrogen,  1,  "adf21/bms97#h/bms97#h_h1.dat"),
+        (hydrogen, helium,    2,  "adf21/bms97#h/bms97#h_he2.dat"),
+        (hydrogen, lithium,   3,  "adf21/bms97#h/bms97#h_li3.dat"),
+        (hydrogen, beryllium, 4,  "adf21/bms97#h/bms97#h_be4.dat"),
+        (hydrogen, boron,     5,  "adf21/bms97#h/bms97#h_b5.dat"),
+        (hydrogen, carbon,    6,  "adf21/bms97#h/bms97#h_c6.dat"),
+        (hydrogen, nitrogen,  7,  "adf21/bms97#h/bms97#h_n7.dat"),
+        (hydrogen, oxygen,    8,  "adf21/bms97#h/bms97#h_o8.dat"),
+        (hydrogen, fluorine,  9,  "adf21/bms97#h/bms97#h_f9.dat"),
+        (hydrogen, neon,      10, "adf21/bms97#h/bms97#h_ne10.dat"),
+    ),
+    'adf22bmp': (
+        # (beam species, beam metastable, target ion, target ionisation, rate file)
+        (hydrogen, 2, hydrogen,  1,  "adf22/bmp97#h/bmp97#h_2_h1.dat"),
+        (hydrogen, 3, hydrogen,  1,  "adf22/bmp97#h/bmp97#h_3_h1.dat"),
+        (hydrogen, 4, hydrogen,  1,  "adf22/bmp97#h/bmp97#h_4_h1.dat"),
+        (hydrogen, 2, helium,    2,  "adf22/bmp97#h/bmp97#h_2_he2.dat"),
+        (hydrogen, 3, helium,    2,  "adf22/bmp97#h/bmp97#h_3_he2.dat"),
+        (hydrogen, 4, helium,    2,  "adf22/bmp97#h/bmp97#h_4_he2.dat"),
+        (hydrogen, 2, lithium,   3,  "adf22/bmp97#h/bmp97#h_2_li3.dat"),
+        (hydrogen, 3, lithium,   3,  "adf22/bmp97#h/bmp97#h_3_li3.dat"),
+        (hydrogen, 4, lithium,   3,  "adf22/bmp97#h/bmp97#h_4_li3.dat"),
+        (hydrogen, 2, beryllium, 4,  "adf22/bmp97#h/bmp97#h_2_be4.dat"),
+        (hydrogen, 3, beryllium, 4,  "adf22/bmp97#h/bmp97#h_3_be4.dat"),
+        (hydrogen, 4, beryllium, 4,  "adf22/bmp97#h/bmp97#h_4_be4.dat"),
+        (hydrogen, 2, boron,     5,  "adf22/bmp97#h/bmp97#h_2_b5.dat"),
+        (hydrogen, 3, boron,     5,  "adf22/bmp97#h/bmp97#h_3_b5.dat"),
+        (hydrogen, 4, boron,     5,  "adf22/bmp97#h/bmp97#h_4_b5.dat"),
+        (hydrogen, 2, carbon,    6,  "adf22/bmp97#h/bmp97#h_2_c6.dat"),
+        (hydrogen, 3, carbon,    6,  "adf22/bmp97#h/bmp97#h_3_c6.dat"),
+        (hydrogen, 4, carbon,    6,  "adf22/bmp97#h/bmp97#h_4_c6.dat"),
+        (hydrogen, 2, nitrogen,  7,  "adf22/bmp97#h/bmp97#h_2_n7.dat"),
+        (hydrogen, 3, nitrogen,  7,  "adf22/bmp97#h/bmp97#h_3_n7.dat"),
+        (hydrogen, 4, nitrogen,  7,  "adf22/bmp97#h/bmp97#h_4_n7.dat"),
+        (hydrogen, 2, oxygen,    8,  "adf22/bmp97#h/bmp97#h_2_o8.dat"),
+        (hydrogen, 3, oxygen,    8,  "adf22/bmp97#h/bmp97#h_3_o8.dat"),
+        (hydrogen, 4, oxygen,    8,  "adf22/bmp97#h/bmp97#h_4_o8.dat"),
+        (hydrogen, 2, fluorine,  9,  "adf22/bmp97#h/bmp97#h_2_f9.dat"),
+        (hydrogen, 3, fluorine,  9,  "adf22/bmp97#h/bmp97#h_3_f9.dat"),
+        (hydrogen, 4, fluorine,  9,  "adf22/bmp97#h/bmp97#h_4_f9.dat"),
+        (hydrogen, 2, neon,      10, "adf22/bmp97#h/bmp97#h_2_ne10.dat"),
+        (hydrogen, 3, neon,      10, "adf22/bmp97#h/bmp97#h_3_ne10.dat"),
+        (hydrogen, 4, neon,      10, "adf22/bmp97#h/bmp97#h_4_ne10.dat"),
+    ),
+    'adf22bme': (
+        # (beam species, target_ion, target_ionisation, (initial_level, final_level), rate file)
+        (hydrogen, hydrogen,  1,  (3, 2), "adf22/bme10#h/bme10#h_h1.dat"),
+        (hydrogen, helium,    2,  (3, 2), "adf22/bme97#h/bme97#h_he2.dat"),
+        (hydrogen, lithium,   3,  (3, 2), "adf22/bme97#h/bme97#h_li3.dat"),
+        (hydrogen, beryllium, 4,  (3, 2), "adf22/bme97#h/bme97#h_be4.dat"),
+        (hydrogen, boron,     5,  (3, 2), "adf22/bme97#h/bme97#h_b5.dat"),
+        (hydrogen, carbon,    6,  (3, 2), "adf22/bme97#h/bme97#h_c6.dat"),
+        (hydrogen, nitrogen,  7,  (3, 2), "adf22/bme97#h/bme97#h_n7.dat"),
+        (hydrogen, oxygen,    8,  (3, 2), "adf22/bme97#h/bme97#h_o8.dat"),
+        (hydrogen, fluorine,  9,  (3, 2), "adf22/bme97#h/bme97#h_f9.dat"),
+        (hydrogen, neon,      10, (3, 2), "adf22/bme97#h/bme97#h_ne10.dat"),
+        (hydrogen, argon,     18, (3, 2), "adf22/bme99#h/bme99#h_ar18.dat"),
+    )
+}
+
+
+install_files(rates, download=True, repository_path=None, adas_path=None)
+
