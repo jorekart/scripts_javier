@@ -1,0 +1,7 @@
+namelist input
+si-units
+set surfaces 200
+for step 0 do
+  expressions Psi_N Te ne currdens 
+  average 
+done
