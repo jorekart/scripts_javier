@@ -18,7 +18,7 @@ def to_RZ(tht, R0, Z0, r):
 def compute_triangle_normal(p1,p2,p3):
     p21 = p2 - p1 
     p31 = p3 - p1 
-    normal = np.cross(p31,p21)
+    normal = np.cross(p21,p31)
     return normal/np.linalg.norm(normal)
 
 phi_start = 0.0;   phi_end = 2*np.pi
@@ -32,7 +32,8 @@ tht_start = -2*np.pi*15/360.0;   tht_end = 2*np.pi*15/360.0
 dR        = 0.1 
 R0        = 4.0;   Z0 = 0.63;   r_min = 8.4+0.1-R0
 
-nphi = 180;     ntht   = 80
+#nphi = 500;     ntht   = 100
+nphi = 60;     ntht   = 40
 dphi = (phi_end - phi_start) / float(nphi)
 dtht = (tht_end - tht_start) / float(ntht)
 
