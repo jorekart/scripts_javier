@@ -193,7 +193,7 @@ class Second_window(QtWidgets.QWidget, eq_win4.Ui_Form_eq): #QtGui.QWidget
         ax.plot(x, y, label = "j_tor")
         ax.plot(x, y1, label = "j_btstrp")
         ax.set_xlim([0.0, 1.0])
-        ax.set_ylim([min(y)*1.05, 0.0])
+        # ax.set_ylim([min(y)*1.05, 0.0])
         ax.set_title("j, A/m²")
         ax.legend(loc='center left',bbox_to_anchor=(1,0.5))
 
@@ -205,7 +205,7 @@ class Second_window(QtWidgets.QWidget, eq_win4.Ui_Form_eq): #QtGui.QWidget
         
         ax.plot(x, y, 'r-', label="q")
         ax.set_xlim([0.0, 1.0])
-        ax.set_ylim([0.0, max(y)*1.05])
+        # ax.set_ylim([0.0, max(y)*1.05])
         ax.set_title("q")
         ax.legend(loc='center left',bbox_to_anchor=(1,0.5))
     
