@@ -1,0 +1,12 @@
+up_Ne6e18_Kpar30
+up_Ne3e19_Kpar30
+up_Ne2e20_Kpar30
+down_Ne6e18_Kpar30
+down_Ne3e19_Kpar30
+down_Ne2e20_Kpar30
+up_Ne6e18_Kpar170
+up_Ne3e19_Kpar170
+up_Ne2e20_Kpar170
+down_Ne6e18_Kpar170
+down_Ne3e19_Kpar170
+down_Ne2e20_Kpar170

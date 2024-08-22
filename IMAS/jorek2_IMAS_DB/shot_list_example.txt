@@ -1,0 +1,12 @@
+111111 up_Ne6e18_Kpar30
+111112 up_Ne3e19_Kpar30
+111113 up_Ne2e20_Kpar30
+111114 down_Ne6e18_Kpar30
+111115 down_Ne3e19_Kpar30
+111116 down_Ne2e20_Kpar30
+111117 up_Ne6e18_Kpar170
+111118 up_Ne3e19_Kpar170
+111119 up_Ne2e20_Kpar170
+111120 down_Ne6e18_Kpar170
+111121 down_Ne3e19_Kpar170
+111122 down_Ne2e20_Kpar170

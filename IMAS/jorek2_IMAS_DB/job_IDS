@@ -1,0 +1,13 @@
+#!/bin/bash -l
+#SBATCH --time=730:00:00
+#SBATCH --job-name=jorek2IDS
+#SBATCH --exclusive
+#SBATCH --exclude=c06s31 
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=56
+#SBATCH --nodes=1
+#SBATCH --partition=gen11
+#SBATCH --error myjob.err
+
+export OMP_NUM_THREADS=56
+
