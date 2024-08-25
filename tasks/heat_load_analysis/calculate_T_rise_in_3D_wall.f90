@@ -107,7 +107,9 @@ module mod_vtk
     close(10)
     
   end subroutine read_vtk
-  
+
+
+
   subroutine write_vtk(filename, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
                 q_heat_perp_3d, field_wall_angle, time, T_tri)
 
@@ -181,6 +183,46 @@ module mod_vtk
 
 end subroutine write_vtk
 
+
+
+
+subroutine write_formatted_data(filename, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
+  q_heat_perp_3d, field_wall_angle, time, T_tri)
+
+implicit none
+
+! Subroutine arguments
+character(len=*), intent(in) :: filename
+integer, intent(in) :: n_nodes, n_tri
+real(8), intent(in) :: nodes_xyz(:,:)
+integer, intent(in) :: indices(:,:)
+real(8), intent(in) :: Jperp(:), l_part(:), q_heat_perp_3d(:), field_wall_angle(:), T_tri(:)
+real(8), intent(in) :: time
+
+! Local variables
+integer :: i, j
+integer, parameter :: ivtk = 22 ! Unit number for the VTK output file
+
+open(unit=ivtk,file=filename,form='unformatted',status='replace', action='write' )
+
+write(ivtk) time
+write(ivtk) n_nodes
+write(ivtk) ((nodes_xyz(j,i), j=1,3), i=1,n_nodes)
+write(ivtk) n_tri
+write(ivtk) ((indices(j,i), j=1,3), i=1,n_tri)
+write(ivtk) (Jperp(i), i=1,n_tri)
+write(ivtk) (l_part(i), i=1,n_tri)
+write(ivtk) (q_heat_perp_3d(i), i=1,n_tri)
+write(ivtk) (field_wall_angle(i), i=1,n_tri)
+write(ivtk) (T_tri(i), i=1,n_tri)
+
+! Close the file
+close(ivtk)
+
+end subroutine write_formatted_data
+
+
+
 end module mod_vtk
 
 
@@ -231,7 +273,7 @@ program calculate_T_rise_in_3D_wall
 
   ! Declarations
   integer :: n_nodes, n_tri
-  integer :: i_begin=10000, i_end=39000, i_step, i_jump_steps=100, i_tri, n_qperp
+  integer :: i_begin=100, i_end=43000, i_step, i_jump_steps=100, i_tri, n_qperp
   character(len=64) :: file_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:), ind_qperp(:)
@@ -333,6 +375,13 @@ program calculate_T_rise_in_3D_wall
     write(*,*) 'ntl = ', nt
     write(*,*) 'dt = ', dt
 
+
+    if (t_interval < 0) then
+      write(*,*) 'Issue with restart files, time not monotonic'
+      stop
+    endif
+
+
     T_tri_hist = 0.d0
 
     ! --- Advance the temperaure for each triangle
@@ -365,6 +414,11 @@ program calculate_T_rise_in_3D_wall
 
     call write_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
                    q_heat_perp_3d, field_wall_angle, time_now, T_tri)  
+
+    write(file_name,'(a,i5.5,a)')   'full_wall_with_Trise', i_step, '.dat'
+
+    call write_formatted_data(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
+                   q_heat_perp_3d, field_wall_angle, time_now, T_tri) 
 
     time_before = time_now
 

@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#SBATCH --time=730:29:00
+#SBATCH --job-name=3d_wall_loads
+#SBATCH --exclusive
+#SBATCH --exclude=c07n128 
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=56
+#SBATCH --nodes=1
+#SBATCH --partition=gen11
+#SBATCH --error myjob.err
+
+export OMP_NUM_THREADS=56
+export SLURM_CPU_BIND="rank"   # It does not seem to affect anything
+
+# Define the start and end indices
+i_start=00000  # Replace 1 with your actual start index
+i_end=00000   # Replace 10 with your actual end index
+
+# Directory containing the files
+directory="."  # Replace with your actual directory path
+lockfile="./mylockfile.lock"
+
+# Loop from i_start to i_end
+for ((i=i_start; i<=i_end; i+=100)); do
+    # Format the filename with leading zeros if necessary
+    filename=$(printf "jorek%05d.h5" $i)
+
+    # Full path to the original file
+    original_file="${directory}/${filename}"
+
+    # Full path to the new file
+    new_file="${directory}/jorek_restart.h5"
+
+    # Check if the original file exists
+    if [[ -e $original_file ]]; then
+        # Rename the file
+        exec 200>"$lockfile"
+	flock -n 200 || { echo "Failed to acquire lock"; exit 1; }
+
+        cp "$original_file" "$new_file"
+
+	flock -u 200
+        exec 200>&-  # Close file descriptor 20
+
+        echo "Copied $original_file to $new_file"
+        echo "Run wall_wetted area"
+        srun ~/git.jorek2/fluid_loads_on_3D_wall < input_fake > out_loads
+
+	exec 200>"$lockfile"
+	flock -n 200 || { echo "Failed to acquire lock"; exit 1; }
+
+	wetted_vtk=$(printf "full_wall_corrected%05d.vtk" $i)
+        cp "3D_wall_fluid_loads.vtk" "$wetted_vtk"
+	flock -u 200
+        exec 200>&-  # Close file descriptor 20
+    fi
+done

@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#SBATCH --time=001:29:00
+#SBATCH --job-name=3d_wall_loads
+#SBATCH --exclusive
+#SBATCH --exclude=c07n128 
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=56
+#SBATCH --nodes=1
+#SBATCH --partition=gen11
+#SBATCH --error myjob.err
+
+export OMP_NUM_THREADS=56
+export SLURM_CPU_BIND="rank"   # It does not seem to affect anything
+
+ifort -qopenmp -o calculate_T_rise_in_3D_wall calculate_T_rise_in_3D_wall.f90 
+./calculate_T_rise_in_3D_wall > output_Trise
