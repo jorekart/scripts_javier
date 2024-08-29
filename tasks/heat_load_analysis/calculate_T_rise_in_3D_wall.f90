@@ -4,7 +4,7 @@ module mod_vtk
   contains
 
   subroutine read_vtk(filename, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, & 
-                      q_heat_perp_3d, field_wall_angle, time)
+                      q_heat_perp_3d, field_wall_angle, time, ierr)
     implicit none
   
 
@@ -15,6 +15,7 @@ module mod_vtk
     integer, allocatable, intent(out) :: indices(:,:)
     real(8), allocatable, intent(out) :: Jperp(:), l_part(:), q_heat_perp_3d(:), field_wall_angle(:)
     real(8), intent(inout) :: time
+    integer, intent(out)   :: ierr
 
     ! Local variables
     integer :: i, n_int, j
@@ -22,7 +23,8 @@ module mod_vtk
     character(len=256) :: keyword
 
     ! Open the VTK file for reading
-    open(unit=10, file=filename, status='old', action='read')
+    open(unit=10, file=filename, status='old', action='read', IOSTAT=ierr)
+    if (ierr .ne. 0) return
 
     ! Read and ignore the header lines
     do i = 1, 4
@@ -273,7 +275,7 @@ program calculate_T_rise_in_3D_wall
 
   ! Declarations
   integer :: n_nodes, n_tri
-  integer :: i_begin=100, i_end=43000, i_step, i_jump_steps=100, i_tri, n_qperp
+  integer :: i_begin=1180, i_end=2140, i_step, i_jump_steps=20, i_tri, n_qperp
   character(len=64) :: file_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:), ind_qperp(:)
@@ -281,7 +283,7 @@ program calculate_T_rise_in_3D_wall
 
   ! --- Parameters for heat diffusion
   integer, parameter :: nx=100
-  integer            :: nt, i_time, i
+  integer            :: nt, i_time, i, ierr
   real*8,  parameter :: L=0.01d0, spec_heat_cap =133.d0 , mat_density = 19.254d3, heat_conduct=173.d0, fscale=60.d0
   real*8,  parameter :: stab_param = 0.1d0, T_left=0.d0!373.15
   real(8) ::  dx, dt, alpha, t_interval, time_now, time_before, dTdx
@@ -316,7 +318,8 @@ program calculate_T_rise_in_3D_wall
     
     write(file_name,'(a,i5.5,a)')   'full_wall_corrected', i_step, '.vtk'
     write(*,*) 'Reading ', file_name
-    call read_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now)
+    call read_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now, ierr)
+    if (ierr .ne. 0) cycle
 
     if(i_step==i_begin) then
       allocate(ind_qperp(n_tri))
@@ -352,7 +355,8 @@ program calculate_T_rise_in_3D_wall
     write(file_name,'(a,i5.5,a)')   'full_wall_corrected', i_step, '.vtk'
     write(*,*) 'Calculate T rise for ', file_name
   
-    call read_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now)
+    call read_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now, ierr)
+    if (ierr .ne. 0) cycle
     time_now = time_now*fscale
     q_heat_perp_3d = q_heat_perp_3d/fscale
 
@@ -378,7 +382,7 @@ program calculate_T_rise_in_3D_wall
 
     if (t_interval < 0) then
       write(*,*) 'Issue with restart files, time not monotonic'
-      stop
+      cycle
     endif
 
 
@@ -409,11 +413,11 @@ program calculate_T_rise_in_3D_wall
       endif
     enddo
 
-    write(*,*) 'Write vtk'
-    write(file_name,'(a,i5.5,a)')   'full_wall_with_Trise', i_step, '.vtk'
+    ! write(*,*) 'Write vtk'
+    ! write(file_name,'(a,i5.5,a)')   'full_wall_with_Trise', i_step, '.vtk'
 
-    call write_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
-                   q_heat_perp_3d, field_wall_angle, time_now, T_tri)  
+    ! call write_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
+    !                q_heat_perp_3d, field_wall_angle, time_now, T_tri)  
 
     write(file_name,'(a,i5.5,a)')   'full_wall_with_Trise', i_step, '.dat'
 
