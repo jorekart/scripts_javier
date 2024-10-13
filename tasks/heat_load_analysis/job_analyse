@@ -2,7 +2,7 @@
 #SBATCH --time=001:29:00
 #SBATCH --job-name=3d_wall_loads
 #SBATCH --exclusive
-#SBATCH --exclude=c07n128 
+#SBATCH --exclude=c08n001,c08n008 
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=56
 #SBATCH --nodes=1

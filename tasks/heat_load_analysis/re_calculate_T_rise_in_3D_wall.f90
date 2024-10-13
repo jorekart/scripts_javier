@@ -301,7 +301,7 @@ module heat_diffusion
 #ifdef BE_WALL
     real*8,  parameter :: mat_density = 1.750d3 ! kg/m3
 #else
-    real*8,  parameter :: mat_density = 9.254d3 ! kg/m3
+    real*8,  parameter :: mat_density = 19.254d3 ! kg/m3
 #endif
 
   contains
@@ -461,7 +461,7 @@ program re_calculate_T_rise_in_3D_wall
 
   ! Declarations
   integer :: n_nodes, n_tri
-  integer :: i_begin=5000, i_end=52700, i_step, i_jump_steps=100, i_tri, n_qperp
+  integer :: i_begin=3100, i_end=4400, i_step, i_jump_steps=100, i_tri, n_qperp
   character(len=64) :: file_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:), ind_qperp(:)
@@ -470,8 +470,8 @@ program re_calculate_T_rise_in_3D_wall
 
   ! --- Parameters for heat diffusion
   integer, parameter :: nx=120
-  integer            :: nt, i_time, i, ierr
-  real*8,  parameter :: L=0.012d0,  fscale=1.d0
+  integer            :: nt, i_time, ierr, i
+  real*8,  parameter :: L=0.012d0
   real*8,  parameter :: stab_param = 0.01d0, T_init=473.d0, alpha_max = 6.75d-5
   real(8) ::  dx, dt, t_interval, time_now, time_before
   real(8), allocatable :: T_curr(:,:), q_perp(:)
@@ -553,7 +553,7 @@ program re_calculate_T_rise_in_3D_wall
     ! --- Get q_perp for wetted triangles
     do i_tri=1, n_tri
       if (ind_qperp(i_tri)>0) then
-        q_perp(ind_qperp(i_tri)) = q_heat_perp_3d(i_tri) 
+        q_perp(ind_qperp(i_tri)) = q_heat_perp_3d(i_tri)
       endif
     enddo
 
