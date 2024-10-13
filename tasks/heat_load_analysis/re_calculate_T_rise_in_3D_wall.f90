@@ -298,7 +298,11 @@ end module mod_vtk
 module heat_diffusion
   implicit none
 
-  real*8,  parameter :: mat_density = 19.254d3
+#ifdef BE_WALL
+    real*8,  parameter :: mat_density = 1.750d3 ! kg/m3
+#else
+    real*8,  parameter :: mat_density = 9.254d3 ! kg/m3
+#endif
 
   contains
 
@@ -320,7 +324,7 @@ module heat_diffusion
     T0         = T_curr(1)
     dTdx       = -q / heat_conductivity(T0)
     alpha      = heat_conductivity(T0) / (mat_density*spec_heat_capacity(T0))
-    dalpha_dT  = alpha * ( dheat_conductivity_dT(T0)/heat_conductivity(T0) - dspec_heat_capacity_dT(T0)/spec_heat_capacity(T0) )
+    dalpha_dT  = alpha * ( dheat_conductivity_dT(T0)/heat_conductivity(T0)) ! - dspec_heat_capacity_dT(T0)/spec_heat_capacity(T0) )
     r          = alpha * dt / (dx * dx)
     T_next(1)  = T_curr(1) + 2.d0* r * (T_curr(2) - T_curr(1) - dTdx*dx)  & ! Neumann BC: heat flux at x=0
                  + dalpha_dT * dTdx**2 * dt
@@ -335,7 +339,7 @@ module heat_diffusion
     do i = 2, nx - 1
       Ti        = T_curr(i)
       alpha     = heat_conductivity( Ti ) / (mat_density*spec_heat_capacity( Ti ))
-      dalpha_dT = alpha * ( dheat_conductivity_dT(Ti)/heat_conductivity(Ti) - dspec_heat_capacity_dT(Ti)/spec_heat_capacity(Ti) )
+      dalpha_dT = alpha * ( dheat_conductivity_dT(Ti)/heat_conductivity(Ti) )!- dspec_heat_capacity_dT(Ti)/spec_heat_capacity(Ti) )
       r         = alpha * dt / (dx * dx)
       T_next(i) = T_curr(i) + r * (T_curr(i+1) - 2.0 * T_curr(i) + T_curr(i-1))   &
                   + dt* dalpha_dT / (4.d0*dx*dx) * (T_curr(i+1)-T_curr(i-1))**2
@@ -344,41 +348,50 @@ module heat_diffusion
   end function heat_diffusion_step
 
 
-  ! --- For W
   pure function spec_heat_capacity(T) result(cp)
 
     implicit none
     
     ! Input parameters
     real(8), intent(in) :: T        ! Temperature in K
-    real(8) :: cp   ! specific capacity [J / (kg K)]
+    real(8) :: cp, TC   ! specific capacity [J / (kg K)]
 
+#ifdef BE_WALL
+    TC = T - 273.15
+    cp = -1.338948d-11*TC**4 + 1.310600d-6*TC**3 - 3.143247d-3*TC**2 + 3.344647d0*TC + 1.741434d3
+    if (TC > 1283) cp = 3590
+    if (TC <   20) cp = 1807
+#else
     ! DOI: 10.1007/978-94-007-7587-9_3
     cp = 135.76 + 9.1159d-3*T + 2.3134d-9*T**3 - 6.5233d5 /T**2
     cp = max(cp,129.d0) ! Min for 273
     cp = min(cp,248.d0) ! Max for 3300
+#endif
 
     !cp = 133.d0
   
   end function spec_heat_capacity
 
-  ! --- For W
+
   pure function dspec_heat_capacity_dT(T) result(cp)
 
     implicit none
     
     ! Input parameters
     real(8), intent(in) :: T        ! Temperature in K
-    real(8) :: cp   ! specific capacity [J / (kg K)]
+    real(8) :: cp, TC   ! specific capacity [J / (kg K)]
 
+#ifdef BE_WALL
+    TC = T - 273.15
+    cp = -5.355792d-11*TC**3 + 3.9318d-6*TC**2 - 6.286494d-3*TC + 3.344647d0
+    if (TC > 1283) cp = 0
+    if (TC <   20) cp = 0
+#else
     ! DOI: 10.1007/978-94-007-7587-9_3
     cp = 9.1159d-3 + 6.9402d-9*T**2 + 13.0466d5 /T**3
-    cp = max(cp,0.073755d0) ! Min for 273
-    cp = min(cp,0.0847309d0) ! Max for 3300
-    if (T < 273)   cp = 0.073755d0
-    if (T > 3300)  cp = 0.0847309d0
-
-    cp =0.d0
+    if (T < 273)   cp = 0.d0
+    if (T > 3300)  cp = 0.d0
+#endif
   
   end function dspec_heat_capacity_dT
 
@@ -390,32 +403,45 @@ module heat_diffusion
     
     ! Input parameters
     real(8), intent(in) :: T        ! Temperature in K
-    real(8) :: K   ! specific capacity [J / (kg K)]
+    real(8) :: K, TC   !  [W / (m K)]
 
+#ifdef BE_WALL
+    TC = T - 273.15
+    K = 2.472945d-10*TC**4 - 7.354535d-7*TC**3 + 7.959136d-4*TC**2 - 4.470410d-1*TC + 2.073906d2 
+    K = min(K,200.d0) !20 C
+    K = max(K,60.d0)  !1283 C
+    if (TC > 1283) K = 84.7 
+#else
     ! DOI: 10.1007/978-94-00 7-7587-9_3
     K = 108.34 - 1.052d-2*T + 23419.9/T
     K = min(K,173.d0) !340
     K = max(K,77.d0)  !3600
+#endif
 
     !K = 173.d0
-    
 
   end function heat_conductivity
 
 
-    ! --- For W
   pure function dheat_conductivity_dT(T) result(K)
 
     implicit none
     
     ! Input parameters
     real(8), intent(in) :: T        ! Temperature in K
-    real(8) :: K   ! specific capacity [J / (kg K)]
+    real(8) :: K, TC   ! [W / (m K)]
 
+#ifdef BE_WALL
+    TC = T - 273.15
+    K = 9.89178d-10*TC**3 - 22.063605d-7*TC**2 + 15.918272d-4*TC - 4.470410d-1
+    if (TC > 1283) K = 0
+    if (TC <   20) K = 0
+#else
     ! DOI: 10.1007/978-94-00 7-7587-9_3
     K = -1.052d-2 - 23419.9/T**2
     if (T < 340)   K = -0.2131142d0
     if (T > 3600)  K =-0.01232709d0
+#endif
 
     !K = 0.d0
 
@@ -435,21 +461,20 @@ program re_calculate_T_rise_in_3D_wall
 
   ! Declarations
   integer :: n_nodes, n_tri
-  integer :: i_begin=2200, i_end=59000, i_step, i_jump_steps=100, i_tri, n_qperp
+  integer :: i_begin=5000, i_end=52700, i_step, i_jump_steps=100, i_tri, n_qperp
   character(len=64) :: file_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:), ind_qperp(:)
   real(8), allocatable :: Jperp(:), l_part(:), q_heat_perp_3d(:), field_wall_angle(:), &
-                          T_tri(:), T_tri_hist(:), T_max(:), dT_tri(:), dT_tri_max(:)
+                          T_tri(:), T_tri_hist(:), T_max(:), dT_tri(:), dT_tri_max(:), T_tri_tmp(:)
 
   ! --- Parameters for heat diffusion
   integer, parameter :: nx=120
   integer            :: nt, i_time, i, ierr
-  real*8,  parameter :: L=0.012d0,  fscale=60.d0
-  real*8,  parameter :: stab_param = 0.1d0, T_init=773.d0, alpha_max = 6.75d-5
+  real*8,  parameter :: L=0.012d0,  fscale=1.d0
+  real*8,  parameter :: stab_param = 0.01d0, T_init=473.d0, alpha_max = 6.75d-5
   real(8) ::  dx, dt, t_interval, time_now, time_before
   real(8), allocatable :: T_curr(:,:), q_perp(:)
-  real(8) :: tri_x, tri_y, tri_z, tri_R, tri_phi, tri_theta
 
   dx    = L / real(nx - 1)
   write(*,*) ' heat diffusivity = ', alpha_max, ' m2/s'
@@ -479,7 +504,7 @@ program re_calculate_T_rise_in_3D_wall
     
     write(file_name,'(a,i5.5,a)')   'full_wall_with_Trise', i_step, '.dat'
     write(*,*) 'Reading ', file_name
-    call read_data(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now, T_tri, ierr)
+    call read_data(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle, time_now, T_tri_tmp, ierr)
     if (ierr .ne. 0) cycle
 
     if(i_step==i_begin) then
@@ -563,45 +588,35 @@ program re_calculate_T_rise_in_3D_wall
     do i_tri=1, n_tri
       if (ind_qperp(i_tri)>0) then
         T_tri(i_tri)  = T_curr(ind_qperp(i_tri),1)
-        dT_tri(i_tri) = T_tri(i_tri) - T_init
+        !dT_tri(i_tri) = T_tri(i_tri) - T_init
       endif
     enddo
 
-    if (i_step==i_begin) then
-      allocate(T_max(n_tri))
-      allocate(dT_tri_max(n_tri))
-      T_max = 0.d0
-    endif
+    ! if (i_step==i_begin) then
+    !   allocate(T_max(n_tri))
+    !   allocate(dT_tri_max(n_tri))
+    !   T_max = 0.d0
+    ! endif
 
-    do i=1, n_tri
-      if (T_tri(i)>T_max(i)) then
-        T_max(i)      = T_tri(i)
-        dT_tri_max(i) = dT_tri(i)
-      endif
-    enddo
+    ! do i=1, n_tri
+    !   if (T_tri(i)>T_max(i)) then
+    !     T_max(i)      = T_tri(i)
+    !     dT_tri_max(i) = dT_tri(i)
+    !   endif
+    ! enddo
 
-    write(file_name,'(a,i5.5,a)')   'full_wall_with_Tmax.', i_step, '.vtk'
-    call write_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
-                   q_heat_perp_3d, field_wall_angle, time_now, T_tri, dT_tri_max)  
+    ! write(file_name,'(a,i5.5,a)')   'full_wall_with_Tmax.', i_step, '.vtk'
+    ! call write_vtk(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
+    !                q_heat_perp_3d, field_wall_angle, time_now, T_tri, dT_tri_max)  
+    
+    write(file_name,'(a,i5.5,a)')   'fluxes_with_T_rec.', i_step, '.dat'
 
+    call write_formatted_data(file_name, n_nodes, n_tri, nodes_xyz, indices, Jperp, l_part, &
+                  q_heat_perp_3d, field_wall_angle, time_now, T_tri) 
 
     time_before = time_now
 
   end do
-
-  ! --- Write triangles to theta and phi coordinates
-  do i=1, n_tri
-    tri_x = (nodes_xyz(1,indices(1,i)) + nodes_xyz(1,indices(2,i)) + nodes_xyz(1,indices(3,i)) ) / 3.d0
-    tri_y = (nodes_xyz(2,indices(1,i)) + nodes_xyz(2,indices(2,i)) + nodes_xyz(2,indices(3,i)) ) / 3.d0
-    tri_z = (nodes_xyz(3,indices(1,i)) + nodes_xyz(3,indices(2,i)) + nodes_xyz(3,indices(3,i)) ) / 3.d0
-    tri_R = sqrt(tri_x**2 +tri_y**2)
-
-    tri_phi   = atan2(-tri_y,tri_x)
-    tri_theta = atan2(-(tri_Z-0.0d0),(tri_R-6.2d3))
-
-    write(78, '(3ES14.6)') tri_phi, tri_theta, dT_tri_max(i)
-
-  enddo
 
   ! Deallocate arrays after usage
   deallocate(nodes_xyz, indices, Jperp, l_part, q_heat_perp_3d, field_wall_angle)
