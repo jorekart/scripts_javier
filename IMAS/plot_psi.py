@@ -1,63 +1,36 @@
 import imas
-import matplotlib
 import matplotlib.pyplot as plt
-import argparse
+import sys
+sys.path.append('/home/ITER/artolaj/scripts_hub/scripts_javier/IMAS') 
+from imas_custom_utils import parse_and_open_imas_entry
 import numpy as np
 from scipy.interpolate import interp2d
 
 vv = np.loadtxt('/home/ITER/artolaj/ITER_components/ITER_vessel_inner.txt')
 fw = np.loadtxt('/home/ITER/artolaj/ITER_components/1st_wall.txt')
 
-# MANAGEMENT OF INPUT ARGUMENTS
-# ------------------------------
-parser = argparse.ArgumentParser(description=\
-        '---- Display scenario')
-parser.add_argument('-s','--shot',help='Shot number', required=True,type=int)
-parser.add_argument('-r','--run',help='Run number',required=True,type=int)
-parser.add_argument('-u','--user_or_path',help='User or absolute path name where the data-entry is located', required=False)
-parser.add_argument('-d','--database',help='Database name where the data-entry is located', required=False)
-parser.add_argument('-t','--time',help='Time', required=False,type=float)
-parser.add_argument('-it','--it',help='Time index',required=True,type=int)
+entry_and_args = parse_and_open_imas_entry() 
 
-args = vars(parser.parse_args())
+imas_entry = entry_and_args["entry"]
+args       = entry_and_args["args"]
 
-shot = args["shot"]
-run  = args["run"]
-
-# User or absolute path name
-if args['user_or_path'] != None:
-    user = args['user_or_path']
-else:
-    user = 'public'
-
-# Database name
-if args['database'] != None:
-    database = args['database']
-else:
-    database = 'iter'
-
-# Time
-if args['time'] != None:
-    time = args['time']
-    SingleSlice = True
-else:
-    time = -99.
-    SingleSlice = False
-
-it = args["it"]
-
-imas_entry_init = imas.DBEntry(imas.imasdef.MDSPLUS_BACKEND, database, shot, run, user, data_version = '3')
-imas_entry_init.open()
+qtty = args["quantity"]
+it   = args["time_index"]
 
 idslist = {}
 
-idslist['equilibrium'] = imas_entry_init.get('equilibrium')
+idslist['equilibrium'] = imas_entry.get('equilibrium')
 
 x = idslist['equilibrium'].time_slice[it].profiles_2d[0].grid.dim1
 y = idslist['equilibrium'].time_slice[it].profiles_2d[0].grid.dim2
 
-      
 psi2d = np.transpose(idslist['equilibrium'].time_slice[it].profiles_2d[0].psi)
+if (qtty=='BR'):
+    psi2d = np.transpose(idslist['equilibrium'].time_slice[it].profiles_2d[0].b_field_r)
+if (qtty=='BZ'):
+    psi2d = np.transpose(idslist['equilibrium'].time_slice[it].profiles_2d[0].b_field_z)
+if (qtty=='Jphi'):
+    psi2d = np.transpose(idslist['equilibrium'].time_slice[it].profiles_2d[0].j_phi)
 
 # psi_bnd = idslist['equilibrium'].time_slice[it].boundary.psi
 # psi_sep = idslist['equilibrium'].time_slice[it].boundary_separatrix.psi
@@ -69,7 +42,7 @@ psi2d = np.transpose(idslist['equilibrium'].time_slice[it].profiles_2d[0].psi)
 
 # Create a contour plot
 #contour_plot = plt.contour(x, y, psi2d, levels=contour_levels, cmap='viridis')
-contour_plot = plt.contour(x, y, psi2d, cmap='viridis')
+contour_plot = plt.contour(x, y, psi2d, cmap='viridis', levels=100)
 plt.plot(vv[:,0]*1e-3,vv[:,1]*1e-3)
 plt.plot(fw[:,0],fw[:,1])
 print(idslist['equilibrium'].time[it])

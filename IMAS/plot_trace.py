@@ -1,48 +1,20 @@
 import imas
 import matplotlib.pyplot as plt
-import argparse
+import sys
+sys.path.append('/home/ITER/artolaj/scripts_hub/scripts_javier/IMAS') 
+from imas_custom_utils import parse_and_open_imas_entry
 import numpy as np
 
+entry_and_args = parse_and_open_imas_entry() 
 
-# MANAGEMENT OF INPUT ARGUMENTS
-# ------------------------------
-parser = argparse.ArgumentParser(description=\
-        '---- Display scenario')
-parser.add_argument('-s','--shot',help='Shot number', required=True,type=int)
-parser.add_argument('-r','--run',help='Run number',required=True,type=int)
-parser.add_argument('-q','--quantity',help='Quantity (Ip/Zaxis)',required=True,type=str)
-parser.add_argument('-u','--user_or_path',help='User or absolute path name where the data-entry is located', required=False)
-parser.add_argument('-d','--database',help='Database name where the data-entry is located', required=False)
+imas_entry = entry_and_args["entry"]
+args       = entry_and_args["args"]
 
-args = vars(parser.parse_args())
-
-shot = args["shot"]
-run  = args["run"]
 qtty = args["quantity"]
 
-# User or absolute path name
-if args['user_or_path'] != None:
-    user = args['user_or_path']
-else:
-    user = 'public'
-
-# Database name
-if args['database'] != None:
-    database = args['database']
-else:
-    database = 'iter'
-    
-
-imas_entry_init = imas.DBEntry(imas.imasdef.MDSPLUS_BACKEND, database, shot, run, user, data_version = '3')
-imas_entry_init.open()
-
-idslist = {}
-
-summary = imas_entry_init.get('summary')
+summary = imas_entry.get('summary')
 
 time = summary.time*1e3
-
-
 
 if (qtty=="Ip"):
     value = summary.global_quantities.ip.value * 1e-6
@@ -50,6 +22,18 @@ if (qtty=="Ip"):
 elif (qtty=="Zaxis"):
     value = summary.local.magnetic_axis.position.z
     qtty_name = 'Zaxis [m]'
+elif (qtty=="q95"):
+    value =  summary.global_quantities.q_95.value 
+    qtty_name = 'q95 [-]'
+elif (qtty=="Wth"):
+    value =  summary.global_quantities.energy_thermal.value 
+    qtty_name = 'W_th [J]'
+elif (qtty=="Te_av"):
+    value =  summary.volume_average.t_e.value 
+    qtty_name = 'Te_av [eV]'
+elif (qtty=="ne_av"):
+    value =  summary.volume_average.n_e.value 
+    qtty_name = 'ne_av [eV]'
 
       
 plt.plot(time,value,'*-')
