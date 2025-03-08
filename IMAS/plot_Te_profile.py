@@ -5,9 +5,10 @@ database = 'ITER'
 user     = 'public'
 shot     = 105033
 run      = 1
+dataversion = '3'
 t_index  = 56
 
-imas_entry = imas.DBEntry(imas.imasdef.MDSPLUS_BACKEND, database, shot, run, user, data_version = '3')
+imas_entry = imas.DBEntry(imas.imasdef.MDSPLUS_BACKEND, database, shot, run, user, data_version = dataversion)
 imas_entry.open()
 
 core_profiles = imas_entry.get('core_profiles')

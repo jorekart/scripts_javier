@@ -1,0 +1,37 @@
+&imas_params
+  export_JOREK_variables  = .true.    
+  export_1d_profiles      = .true.    
+  export_equilibrium      = .true.    
+  export_summary          = .true.
+  export_disruption       = .true.
+  export_wall             = .true.   
+  export_pf_passive       = .true.    
+  export_pf_active        = .true.    
+  export_radiation        = .false.   ! export radiation IDS?   
+
+  overwrite_entry = .true.
+
+  database    = 'ITER_VD_study' ! adapt to your case
+  user        = 'artolaj'       ! your user name
+  shot_number = 111211           
+  run_number  = 1
+
+  passive_coil_geo_file = 'passive_components.nml'
+  active_coil_geo_file  = 'polcoils_iter.nml'
+
+  rad_only_projections_h5   = .false.          ! see **
+  i_begin     = 00000       ! start index to search .h5 files
+  i_end       = 05000       ! end index to search .h5 files
+  i_jump_steps= 00020
+
+  simulation_description = 'Cases in fig 2 of F.J. Artola, (2024) PPCF 66 055015' 
+
+  export_field_extension = .false.
+  rect_grid_params%nR    = 100
+  rect_grid_params%nZ    = 200
+  rect_grid_params%R_min = 3.d0
+  rect_grid_params%R_max = 10.d0
+  rect_grid_params%Z_min = -6.d0
+  rect_grid_params%Z_max = 6.d0
+/
+

@@ -22,6 +22,9 @@ if (qtty=="Ip"):
 elif (qtty=="Zaxis"):
     value = summary.local.magnetic_axis.position.z
     qtty_name = 'Zaxis [m]'
+elif (qtty=="li_3"):
+    value =  summary.global_quantities.li_3.value 
+    qtty_name = 'li_3 [-]'
 elif (qtty=="q95"):
     value =  summary.global_quantities.q_95.value 
     qtty_name = 'q95 [-]'
@@ -34,12 +37,19 @@ elif (qtty=="Te_av"):
 elif (qtty=="ne_av"):
     value =  summary.volume_average.n_e.value 
     qtty_name = 'ne_av [eV]'
+elif (qtty=="I_RE"):
+    
+    runaway = imas_entry.get('runaway_electrons')
+    value =  runaway.global_quantities.current_phi * 1e-6
+    time  = runaway.time*1e3
+    qtty_name = 'I_RE [MA]'
 
       
 plt.plot(time,value,'*-')
 
 plt.ylabel(qtty_name)
 plt.xlabel('Time [ms]')
+plt.grid(True)
 
 # Show the plot
 plt.show()
