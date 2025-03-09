@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 from __future__ import print_function
 
-import argparse, imas
-import numpy as np
+import imas
 import sys
-from os import system,getenv
+import shutil
+from os import system
 from sys import exit
-from idstools.cli import *
+#from idstools.cli import *  #module load IDStools
 
 # --------------------------------------------------------------------------------
 # --- Creates an entry for the Disruption database (adapted from create_db_entry
@@ -36,7 +36,8 @@ def create_yaml_file(entry):
     for i in range(add0_length):
         add0 = add0+"0"
 
-    filename = "ids_"+str(entry.shot)+add0+str(entry.run)+".yaml"
+    filename_f = "ids_"+str(entry.shot)+add0+str(entry.run)+".yaml"
+    filename   = "test"
 
     # Go for it: fill the yaml file
     f = open(filename, 'w')
@@ -124,12 +125,31 @@ def create_yaml_file(entry):
     f.write("""# ------------------------------------------------------------------------------\n""")
     f.write("""idslist:\n""")
     f.close()
+    
+    uri = imas.DBEntry.build_uri_from_legacy_parameters(
+    backend_id=entry.backend,
+    pulse=entry.shot,
+    run=entry.run,
+    db_name=entry.database,
+    user_name=entry.user,
+    data_version=entry.version
+    )
+    print(uri)
 
     # Complete the yaml file with the output of ids_content
-    system('ids_content -u ' + entry.user + ' -d ' + entry.database \
-            + ' -s ' + str(entry.shot) + ' -r ' + str(entry.run) + ' >> ' + filename)
+    system('idslist -y -u "' + uri +'"'+ ' >> ' + filename)
 
-    print("----> " + filename + " created.", file=sys.stdout)
+    # Cleanup output from idslist command
+    idslist_found = False
+    with open(filename, "r") as infile, open(filename_f, "w") as outfile:
+      for line in infile:
+          if "idslist:" in line:
+              idslist_found = True
+          if idslist_found and not ":" in line:
+              continue
+          outfile.write(line)
+
+    print("----> " + filename_f + " created.", file=sys.stdout)
 
     # Associated WATCHER file
     filename = "ids_"+str(entry.shot)+add0+str(entry.run)+".watcher"
@@ -141,6 +161,8 @@ def create_yaml_file(entry):
         f.write(""" Javier			Artola   		javier.artola@iter.org\n""")
         f.close()
     print("----> " + filename + " created.", file=sys.stdout)
+
+    return filename_f, filename
 
 
 # IMPORTANT!!! CHECK BEFORE WRITTING YAML FILES!!
@@ -154,10 +176,11 @@ info['machine']         = 'ITER'
 
 database      = 'JOREK_disruptions'
 user          = 'artolaj'
-imas_version  = '3'
-backend       = 'MDSPLUS'
+imas_version  = '4'
+backend       = imas.imasdef.HDF5_BACKEND
 ro            = 'Javier Artola'
 run           = 1
+local_db_path = '/home/ITER/'+user+'/public/imasdb/' + database + '/' + imas_version + '/'
 
 shot_list_file = 'shot_list.txt'
 
@@ -175,7 +198,7 @@ for case in shot_list:
     print(str(entry.shot) + ' ' + case[1])
 
     # Open the database and read the necessary IDSs
-    input = imas.DBEntry(get_backend_id(entry.backend),entry.database,entry.shot,entry.run,user_name=entry.user,data_version=entry.version)
+    input = imas.DBEntry(entry.backend,entry.database,entry.shot,entry.run,user_name=entry.user,data_version=entry.version)
     err,n = input.open()
     if err != 0:
         print('Shot ' + str(entry.shot) + ', run ' + str(entry.run) + ' does not exist', file=sys.stderr)
@@ -188,6 +211,10 @@ for case in shot_list:
         ne0 = input.partial_get('core_profiles','profiles_1d(:)/electrons/density(0)')
         central_electron_density = ne0[0]   
     except:
+        try:
+             ne0 = input.partial_get('plasma_profiles','profiles_1d(:)/electrons/density(0)')
+             central_electron_density = ne0[0]   
+        except:
         print("core_profiles.profiles_1d[:].electrons.density[0] could not be read", file=sys.stderr)
         ne0 = 0
     
@@ -229,4 +256,9 @@ for case in shot_list:
 
     entry.initialize_info(info)
 
-    create_yaml_file(entry)
+    filename_f, filename_watcher = create_yaml_file(entry)
+    
+    # Copy yaml files to local DB
+    case_path = local_db_path + str(entry.shot )+ '/' + str(entry.run) + '/'    
+    shutil.copy2(filename_f,       case_path + filename_f)
+    shutil.copy2(filename_watcher, case_path + filename_watcher)

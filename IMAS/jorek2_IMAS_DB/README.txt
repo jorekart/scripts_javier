@@ -24,3 +24,8 @@ POTENTIAL ISSUES: jorek2_postproc fails sometimes with averaging profiles.
    initialise_postproc_settings in communication/IMAS/mod_jorek2IDS.f90
       call set_setting('rad_range_min',   '0.05',  ierr, 'numerical parameter for field line tracing'         )
       call set_setting('rad_range_max',   '0.95', ierr, 'numerical parameter for field line tracing'         )
+   Some times increasing nmaxsteps also helps because one poloidal turn does not complete...
+
+
+6) After this is done, we have to create the DB entries. For that, adjust the metada in create_db_entry_disruption.py and run it
+   the watcher files should be automatically sent to the local DB
