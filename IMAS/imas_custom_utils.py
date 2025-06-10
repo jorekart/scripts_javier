@@ -41,5 +41,6 @@ def parse_and_open_imas_entry():
     output = {}
     output["entry"] = imas_entry
     output["args"] = args
+    output["uri"] = uri
 
     return output

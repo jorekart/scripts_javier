@@ -30,6 +30,9 @@ psi_name  = 'psi'
 transform_to_psiN = False
 profile_ids = 'plasma_profiles'
 
+if (int(args["version"]) == 3):
+    profile_ids = 'core_profiles'
+
 if (qtty==Te_name): 
     prof  = profile(Te_name,profile_ids,r'$T_e$ [eV]', 'profiles_1d(:)/electrons/temperature')
 elif (qtty==Jtor_name): 
