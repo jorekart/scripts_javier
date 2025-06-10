@@ -86,7 +86,7 @@ def do_plot_raw4(x,y,scale, frame_ratio, x_label, x_lab_font, x_range,
             axes[i].set_yticks(np.arange(sub_plts[i].yticks[0], sub_plts[i].yticks[1], sub_plts[i].yticks[2]))
 
         if (grid_log):
-            axes[i].grid(b=True, which="both", axis="both", linewidth=grid_thick)                                               
+            axes[i].grid(visible=True, which="both", axis="both", linewidth=grid_thick)                                               
 
         if (sub_plts[i].leglog):
             axes[i].legend(title=leg_lab, fontsize=sub_plts[i].legfont*scale, ncol=leg_col, bbox_to_anchor=(sub_plts[i].legloc[0], sub_plts[i].legloc[1]))             # Legend fontsize and location (0 for best)                              
