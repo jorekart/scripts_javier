@@ -295,16 +295,19 @@ module mod_utils
 
 
 
-  subroutine read_namelist(i_begin, i_end, i_jump_steps, file_name)
+  subroutine read_namelist(i_begin, i_end, i_jump_steps, file_name, frad, R_geo, Z_geo)
     !! Reads Namelist from given file.
     integer,           intent(inout) :: i_begin, i_end, i_jump_steps
     integer                          :: fu, rc
     logical                          :: file_exists
+    real*8, optional,intent(inout)   :: frad             !> radiation fraction (if simulation has no radiation,
+                                                         !> but a radiation fraction is assumed in reality)
+    real*8, optional,intent(inout)   :: R_geo, Z_geo     !> for theta calculation
     character(len=64),intent(inout)  :: file_name
     character(len=64)                :: wall_f_name
 
     ! Namelist definition.
-    namelist /restart_inputs/ i_begin, i_end, i_jump_steps, wall_f_name
+    namelist /restart_inputs/ i_begin, i_end, i_jump_steps, wall_f_name, frad, R_geo, Z_geo
 
     ! Check whether file exists.
     inquire (file='heat_load.nml', exist=file_exists)
