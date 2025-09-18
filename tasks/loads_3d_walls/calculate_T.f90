@@ -4,7 +4,8 @@ module heat_diffusion
 #ifdef BE_WALL
   real*8,  parameter :: mat_density = 1.750d3 ! kg/m3
   real*8, parameter :: alpha_max = 6.75d-5
-#elif defined(W_alloy) !W97Ni2Fe1 
+#elif defined(W_alloy)
+  !W97Ni2Fe1 
   real*8, parameter :: mat_density =18.5d3 !kg/m3
   real*8, parameter :: alpha_max = 3.5d-5
 #else
@@ -198,9 +199,10 @@ program calculate_T
   integer, parameter :: nx=120
   integer            :: nt, i_time, ierr, i
   real*8,  parameter :: L=0.012d0
-  real*8,  parameter :: stab_param = 0.01d0, T_init=473.d0
-  real(8) ::  dx, dt, t_interval, time_now, time_before, frad
+  real*8,  parameter :: stab_param = 0.01d0
+  real(8) ::  dx, dt, t_interval, time_now, time_before, frad=0.d0, T_init=473.d0
   real(8), allocatable :: T_curr(:,:), q_perp(:)
+
 
 #ifdef BE_WALL
   write(*,*) 'Using Be wall'
@@ -210,8 +212,8 @@ program calculate_T
   write(*,*) 'Using W wall'
 #endif
 
-  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name, frad=frad)
-
+  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name, frad=frad, T_init=T_init)
+  
   dx    = L / real(nx - 1)
   write(*,*) ' heat diffusivity = ', alpha_max, ' m2/s'
   write(*,*) ' Radial grid width for T = ', dx
