@@ -89,7 +89,7 @@ program analyze_wall_T
     tri_R = sqrt(tri_x**2 +tri_y**2)
 
     tri_phi   = atan2(-tri_y,tri_x)
-    tri_theta = atan2(-(tri_Z-0.0d0),(tri_R-R_geo))
+    tri_theta = atan2(-(tri_Z-Z_geo),(tri_R-R_geo))
 
     write(20, '(6ES14.6)') tri_phi, tri_theta, T_max(i), melt_duration(i), E_dep(i), tri_areas(i)
 
