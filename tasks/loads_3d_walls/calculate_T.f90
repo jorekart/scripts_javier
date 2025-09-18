@@ -2,9 +2,15 @@ module heat_diffusion
   implicit none
 
 #ifdef BE_WALL
-    real*8,  parameter :: mat_density = 1.750d3 ! kg/m3
+  real*8,  parameter :: mat_density = 1.750d3 ! kg/m3
+  real*8, parameter :: alpha_max = 6.75d-5
+#elif defined(W_alloy)
+  !W97Ni2Fe1 
+  real*8, parameter :: mat_density =18.5d3 !kg/m3
+  real*8, parameter :: alpha_max = 3.5d-5
 #else
-    real*8,  parameter :: mat_density = 19.254d3 ! kg/m3
+  real*8,  parameter :: mat_density = 19.254d3 ! kg/m3
+  real*8, parameter :: alpha_max = 6.75d-5
 #endif
 
   contains
@@ -64,6 +70,12 @@ module heat_diffusion
     cp = -1.338948d-11*TC**4 + 1.310600d-6*TC**3 - 3.143247d-3*TC**2 + 3.344647d0*TC + 1.741434d3
     if (TC > 1283) cp = 3590
     if (TC <   20) cp = 1807
+#elif defined(W_alloy)
+    cp = 4.05260522e-09*T**3 -1.65961644e-05*T**2 + 4.79594887e-02*T + 1.25588588e+02
+    if (T>1800) then
+      TC = 1800.d0
+      cp = 4.05260522e-09*TC**3 -1.65961644e-05*TC**2 + 4.79594887e-02*TC + 1.25588588e+02
+    end if
 #else
     ! DOI: 10.1007/978-94-007-7587-9_3
     cp = 135.76 + 9.1159d-3*T + 2.3134d-9*T**3 - 6.5233d5 /T**2
@@ -89,6 +101,9 @@ module heat_diffusion
     cp = -5.355792d-11*TC**3 + 3.9318d-6*TC**2 - 6.286494d-3*TC + 3.344647d0
     if (TC > 1283) cp = 0
     if (TC <   20) cp = 0
+#elif defined(W_alloy)
+    cp = 1.2157815660000002e-08*T**2 -3.31923288e-05*T + 4.79594887e-02
+    if (T>1800) cp = 0
 #else
     ! DOI: 10.1007/978-94-007-7587-9_3
     cp = 9.1159d-3 + 6.9402d-9*T**2 + 13.0466d5 /T**3
@@ -113,7 +128,13 @@ module heat_diffusion
     K = 2.472945d-10*TC**4 - 7.354535d-7*TC**3 + 7.959136d-4*TC**2 - 4.470410d-1*TC + 2.073906d2 
     K = min(K,200.d0) !20 C
     K = max(K,60.d0)  !1283 C
-    if (TC > 1283) K = 84.7 
+    if (TC > 1283) K = 84.7
+#elif defined(W_alloy)
+    K =  4.48276523e-12*T**4 -1.68635680e-08*T**3 +   1.23066061e-05*T**2 + 1.91911470e-02*T + 7.08049586e+01
+    if (T>1800) then
+      TC = 1800.d0
+      K =  4.48276523e-12*TC**4 -1.68635680e-08*TC**3 +   1.23066061e-05*TC**2 + 1.91911470e-02*TC + 7.08049586e+01
+    end if
 #else
     ! DOI: 10.1007/978-94-00 7-7587-9_3
     K = 108.34 - 1.052d-2*T + 23419.9/T
@@ -139,6 +160,9 @@ module heat_diffusion
     K = 9.89178d-10*TC**3 - 22.063605d-7*TC**2 + 15.918272d-4*TC - 4.470410d-1
     if (TC > 1283) K = 0
     if (TC <   20) K = 0
+#elif defined(W_alloy)
+    K = 1.793106092e-11*T**3  -5.0590704e-08*T**2 + 2.46132122e-05*T  + 1.91911470e-02
+    if (T > 1900) K = 0
 #else
     ! DOI: 10.1007/978-94-00 7-7587-9_3
     K = -1.052d-2 - 23419.9/T**2
@@ -175,12 +199,21 @@ program calculate_T
   integer, parameter :: nx=120
   integer            :: nt, i_time, ierr, i
   real*8,  parameter :: L=0.012d0
-  real*8,  parameter :: stab_param = 0.01d0, T_init=473.d0, alpha_max = 6.75d-5
-  real(8) ::  dx, dt, t_interval, time_now, time_before
+  real*8,  parameter :: stab_param = 0.01d0
+  real(8) ::  dx, dt, t_interval, time_now, time_before, frad=0.d0, T_init=473.d0
   real(8), allocatable :: T_curr(:,:), q_perp(:)
 
-  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name)
 
+#ifdef BE_WALL
+  write(*,*) 'Using Be wall'
+#elif defined(W_alloy)
+  write(*,*) 'Using W alloy wall'
+#else
+  write(*,*) 'Using W wall'
+#endif
+
+  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name, frad=frad, T_init=T_init)
+  
   dx    = L / real(nx - 1)
   write(*,*) ' heat diffusivity = ', alpha_max, ' m2/s'
   write(*,*) ' Radial grid width for T = ', dx
@@ -258,7 +291,7 @@ program calculate_T
     ! --- Get q_perp for wetted triangles
     do i_tri=1, n_tri
       if (ind_qperp(i_tri)>0) then
-        q_perp(ind_qperp(i_tri)) = q_heat_perp_3d(i_tri)*(1.d0-0.22d0)
+        q_perp(ind_qperp(i_tri)) = q_heat_perp_3d(i_tri)*(1.d0-frad)
       endif
     enddo
 
