@@ -3,7 +3,7 @@ import sys
 import imas
 import matplotlib.pyplot as plt
 
-sys.path.append('/home/ITER/artolaj/scripts_hub/scripts_javier/IMAS')
+sys.path.append('/home/ITER/artolaj/scripts_javier/IMAS')
 from imas_custom_utils2 import read_uris, get_entries, parse_imas_uri_kv, make_entry_label
 
 
@@ -38,7 +38,7 @@ def get_time_value_and_label(entry, qtty):
 def main():
     parser = argparse.ArgumentParser(description="Plot IMAS quantity for one or many URIs.")
     src = parser.add_mutually_exclusive_group(required=True)
-    src.add_argument("--uri", "-uri", type=str, help='Single IMAS URI (wrap in quotes).')
+    src.add_argument("--uri", "-uri", type=str, help="Single IMAS URI e.g. 'imas:hdf5?user=artolaj;database=DINA_2010;version=4;pulse=111144;run=1'")
     src.add_argument("--uri_file", "-uf", type=str, help="Text file with one IMAS URI per line.")
     parser.add_argument("-q", "--quantity", default="Ip",
                         help="Ip/Zaxis/li_3/q95/Wth/Te_av/ne_av/I_RE")
