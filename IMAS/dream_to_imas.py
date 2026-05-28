@@ -83,7 +83,7 @@ else:
 
 # ------------------------ normalization factors---------------------------
 psi_cocos = 2.0*np.pi # good
-curr_dir  = 1.0       # good for ITER
+curr_dir  = 1.0       # 
 gamma_adb = 5.0/3.0
 c_light    = 299792458.0
 m_electron = 9.10938356e-31
@@ -607,6 +607,11 @@ def infer_isotope_mass_number(
 
         # DREAM default for Z=1 if not explicitly marked otherwise.
         return 2
+    
+    if z == 10:
+        return 20   # Neon
+    if z == 18:
+        return 40   # Argon
 
     return None
 
@@ -872,6 +877,10 @@ def fill_ion_profiles_1d(
 
         if block.size == 0:
             continue
+
+        if has_ion and has_neutral:
+            set_path(p.ion[iion], "neutral_index", iion, report, ids_name, "DREAM species index")
+            set_path(p.neutral[iion], "ion_index", iion, report, ids_name, "DREAM species index") 
 
         # ------------------------------------------------------------
         # DREAM Z0=0: neutral density
