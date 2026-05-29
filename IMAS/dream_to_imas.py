@@ -214,25 +214,6 @@ def normalized_radius(r: np.ndarray) -> np.ndarray:
         return np.zeros_like(r)
     return (r - r0) / denom
 
-
-def cumulative_volume_from_shell_metric(r: np.ndarray, vpvol: Optional[np.ndarray]) -> Optional[np.ndarray]:
-    """Best-effort enclosed volume from DREAM grid/VpVol.
-
-    DREAM's VpVol is a radial-grid metric, not guaranteed to be exactly dV/dr
-    for every geometry option. We therefore only use it as a best-effort
-    enclosed-volume estimate and mark the mapping as a warning in the caller.
-    """
-    if vpvol is None:
-        return None
-    r = np.asarray(r, dtype=float)
-    v = np.asarray(vpvol, dtype=float).reshape(-1)
-    if len(v) != len(r) or len(r) < 2:
-        return None
-    dr = np.gradient(r)
-    enclosed = np.cumsum(np.maximum(v, 0.0) * np.maximum(dr, 0.0))
-    return enclosed
-
-
 # ----------------------------- IMAS helpers -------------------------------
 
 def ensure_imas() -> None:
@@ -337,7 +318,8 @@ def common_grids(dream: DreamH5, report: MappingReport) -> dict[str, Any]:
     time = flatten_1d(dream.arr("/grid/t", report))
 
     # Minor radius R-Raxis in [m]
-    r = flatten_1d(dream.arr("/grid/r", report))
+    r  = flatten_1d(dream.arr("/grid/r", report))
+    dr = flatten_1d(dream.arr("/grid/dr", report))
 
     # R at magnetic axis in [m]
     R0 = dream.scalar("/grid/R0", dream.scalar("/grid/eq/R0", None))
@@ -356,20 +338,38 @@ def common_grids(dream: DreamH5, report: MappingReport) -> dict[str, Any]:
     rho_tor = np.sqrt(phi_tor / (np.pi * B0)) # minor radius like
     rho_tor_norm = normalized_radius(rho_tor) # normalized to 1 at the outermost radius
 
+    # Other geometric quantities
+    vpvol  = flatten_1d(dream.arr("/grid/VpVol", report))
+    G      = flatten_1d(dream.arr("/grid/geometry/GR0", report))
+    R2inv  = flatten_1d(dream.arr("/grid/geometry/FSA_R02OverR2", report))
+    Bmin   = flatten_1d(dream.arr("/grid/geometry/Bmin", report))
+    Bmax   = flatten_1d(dream.arr("/grid/geometry/Bmax", report))
+
+    weight_int_area = dr * vpvol * G * R2inv / (2*np.pi*Bmin)
+    weight_int_vol  = dr * vpvol * R0
+    dVdr =  vpvol * R0
+
     if time is None or time.size == 0:
         raise ValueError("DREAM file does not contain a valid /grid/t array")
     if r is None or r.size == 0:
         raise ValueError("DREAM file does not contain a valid /grid/r array")
 
+    R_outboard = R0 + r
+
     return {
         "time": np.asarray(time, dtype=float),
         "r": np.asarray(r, dtype=float),
-        "rho": rho_tor,
+        "dr": np.asarray(dr, dtype=float),
+        "R_outboard": np.asarray(R_outboard, dtype=float),
+        "phi_tor": phi_tor,  
         "rho_tor": rho_tor,
         "rho_tor_norm": rho_tor_norm,
         "R0": R0,
         "a": dream.scalar("/grid/a", None),
         "B0": B0,
+        "dVdr": dVdr,
+        "weight_int_area": weight_int_area,
+        "weight_int_vol": weight_int_vol
     }
 
 
@@ -401,9 +401,9 @@ def fill_1d_grid(p: Any, grids: dict[str, Any], dream: DreamH5, nt: int, it: int
     set_path(p, "grid/rho_tor", rho_tor, report, ids_name, "/grid/geometry/toroidalFlux")
     set_path(p, "grid/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
 
-    psi_p = time_aligned(dream.arr("/eqsys/psi_p"), nt)
+    psi_p = time_aligned(dream.arr("/eqsys/psi_p"), nt)*psi_cocos
     if psi_p is not None:
-        psi_arr  = np.asarray(psi_p[it]*psi_cocos, dtype=float)
+        psi_arr  = np.asarray(psi_p[it], dtype=float)
         psi_bnd  = float(psi_arr[-1]) if psi_arr.size > 0 else 0.0
         psi_axis = float(psi_arr[0]) if psi_arr.size > 0 else 0.0
         psi_norm = normalized_radius(psi_arr) if psi_arr is not None else None
@@ -446,8 +446,6 @@ def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], rep
     if profiles["electrons/density"][1] is None:
         profiles["electrons/density"] = ("/eqsys/n_cold", dream.arr("/eqsys/n_cold", report))
 
-    # Optional current density mapping. In DD 4.1.0, total current density is in
-    # the GGD branch. Some installations may expose convenient 1D nodes; try both.
     j_tot = dream.arr("/eqsys/j_tot", report)
     j_ohm = dream.arr("/eqsys/j_ohm", report)
 
@@ -980,6 +978,10 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
         report.skip(ids_name, "profiles_1d", "could not resize AoS", "")
         return re_ids
 
+    if not resize_child_aos(re_ids, "global_quantities", nt):
+        report.skip(ids_name, "global_quantities", "could not resize AoS", "")
+        return re_ids
+
     quantities = {
         "density": ("/eqsys/n_re", dream.arr("/eqsys/n_re", report)),
         "current_density": ("/eqsys/j_re", dream.arr("/eqsys/j_re", report)),
@@ -996,6 +998,7 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
         "e_field_critical": ("/other/fluid/Ectot", dream.arr("/other/fluid/Ectot")),
     }
 
+    # Fill up profiles_1d for each time step
     for it in range(nt):
         p = re_ids.profiles_1d[it]
         set_path(p, "time", time[it], report, ids_name, "/grid/t")
@@ -1009,7 +1012,54 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
             elif source:
                 report.missing(source)
 
+    # Fill global_quantities for each time step, if available.
+    weight_int_area = grids.get("weight_int_area")
+    j_RE = dream.arr("/eqsys/j_re")
+    I_RE = np.sum(j_RE * weight_int_area[None,:], axis=1)
+
+    set_path(re_ids, "global_quantities/current", I_RE, report, ids_name, "derived from j_re")
+
     return re_ids
+
+
+import numpy as np
+
+def cell_center_to_edges(xc):
+    """
+    Construct cell-edge values from cell-center values.
+
+    Interior edges are midpoint averages.
+    Boundary edges are linear extrapolations.
+    """
+    xc = np.asarray(xc)
+
+    xf = np.empty(xc.size + 1, dtype=xc.dtype)
+
+    xf[1:-1] = 0.5 * (xc[:-1] + xc[1:])
+    xf[0] = xc[0] - 0.5 * (xc[1] - xc[0])
+    xf[-1] = xc[-1] + 0.5 * (xc[-1] - xc[-2])
+
+    return xf
+
+
+def dVdpsi_from_dVdr(dVdr, dr, psi):
+    """
+    Convert dV/dr to dV/dpsi while preserving the cell-integrated volume.
+
+    dVdr, dr, psi are all cell-centered arrays with the same length.
+    """
+    dVdr = np.asarray(dVdr)
+    dr = np.asarray(dr)
+    psi = np.asarray(psi)
+
+    dV_cell = dVdr * dr
+
+    psi_f = cell_center_to_edges(psi)
+    dpsi = np.diff(psi_f)
+
+    dVdpsi = dV_cell / dpsi
+
+    return dVdpsi, dpsi, psi_f
 
 
 def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
@@ -1019,8 +1069,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
         return None
 
     time = grids["time"]
-    r = grids["r"]
-    rho = grids["rho"]
+
     nt = len(time)
     R0 = grids.get("R0") or 0.0
     Z0 = dream.scalar("/grid/eq/Z0", 0.0) or 0.0
@@ -1032,43 +1081,59 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
         report.skip(ids_name, "time_slice", "could not resize AoS", "")
         return eq
 
-    psi_p = time_aligned(dream.arr("/eqsys/psi_p", report), nt)
+    psi_p = time_aligned(dream.arr("/eqsys/psi_p", report), nt)*psi_cocos
+    j_tot = time_aligned(dream.arr("/eqsys/j_tot", report), nt)
     ip = flatten_1d(dream.arr("/eqsys/I_p", report))
-    psi_edge = flatten_1d(dream.arr("/eqsys/psi_edge"))
-    psi_wall = flatten_1d(dream.arr("/eqsys/psi_wall"))
+    
     r_boundary, z_boundary = boundary_outline(dream, R0, Z0)
 
-    vpvol = dream.arr("/grid/VpVol")
-    volume = cumulative_volume_from_shell_metric(r, vpvol)
-    if volume is not None:
-        report.warn(
-            "equilibrium/time_slice/profiles_1d/volume is estimated from /grid/VpVol and /grid/r; "
-            "verify this convention for your DREAM radial grid before using it quantitatively."
-        )
+    # Some radial grid profiles
+    rho_tor = grids["rho_tor"]
+    rho_tor_norm = grids["rho_tor_norm"]
+    phi_tor = grids["phi_tor"]
+    r = grids["r"]
+    dr = grids["dr"]
 
+    R_outboard = grids["R_outboard"] 
+    dVdr = grids.get("dVdr")
+    
     for it in range(nt):
         ts = eq.time_slice[it]
         set_path(ts, "time", time[it], report, ids_name, "/grid/t")
         if ip is not None and it < len(ip):
             set_path(ts, "global_quantities/ip", float(ip[it]), report, ids_name, "/eqsys/I_p")
-        if psi_edge is not None and it < len(psi_edge):
-            set_path(ts, "global_quantities/psi_boundary", float(psi_edge[it]), report, ids_name, "/eqsys/psi_edge")
-        if psi_wall is not None and it < len(psi_wall):
-            set_path(ts, "global_quantities/psi_wall", float(psi_wall[it]), report, ids_name, "/eqsys/psi_wall")
+        
+        set_path(ts, "profilesls_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
+        set_path(ts, "profiles_1d/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
+        set_path(ts, "profiles_1d/phi_tor", phi_tor, report, ids_name, "derived from phi_tor")
+        set_path(ts, "profiles_1d/r_outboard", R_outboard, report, ids_name, "derived from R0 and r")
+
+        if j_tot is not None:
+            set_path(ts, "profiles_1d/j_phi", j_tot[it], report, ids_name, "/eqsys/j_tot")
 
         if psi_p is not None:
-            set_path(ts, "profiles_1d/psi", psi_p[it], report, ids_name, "/eqsys/psi_p")
-            set_path(ts, "profiles_1d/rho_tor", r, report, ids_name, "/grid/r")
-            set_path(ts, "profiles_1d/rho_tor_norm", rho, report, ids_name, "/grid/r")
-            set_path(ts, "profiles_1d/rho_pol_norm", rho, report, ids_name, "/grid/r (used as proxy)")
-            if volume is not None:
-                set_path(ts, "profiles_1d/volume", volume, report, ids_name, "/grid/VpVol + /grid/r")
+            psi_arr  = np.asarray(psi_p[it], dtype=float)
+            psi_bnd  = float(psi_arr[-1]) if psi_arr.size > 0 else 0.0
+            psi_axis = float(psi_arr[0]) if psi_arr.size > 0 else 0.0
+            psi_norm = normalized_radius(psi_arr) if psi_arr is not None else None
+
+            set_path(ts, "profiles_1d/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
+            set_path(ts, "profiles_1d/rho_pol_norm", psi_norm, report, ids_name, "derived")
+
+            set_path(ts, "global_quantities/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
+            set_path(ts, "profiles_1d/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
+
+            dVdpsi, dpsi, psi_f = dVdpsi_from_dVdr(dVdr, dr, psi_arr)
+
+            set_path(ts, "profiles_1d/dvolume_dpsi", dVdpsi, report, ids_name, "derived")
 
         if r_boundary is not None and z_boundary is not None:
             set_path(ts, "boundary/outline/r", r_boundary, report, ids_name, "/grid/eq/RMinusR0_f[:,-1] + R0")
             set_path(ts, "boundary/outline/z", z_boundary, report, ids_name, "/grid/eq/ZMinusZ0_f[:,-1] + Z0")
             set_path(ts, "boundary/geometric_axis/r", float(np.mean([np.min(r_boundary), np.max(r_boundary)])), report, ids_name, "/grid/eq/RMinusR0_f")
             set_path(ts, "boundary/geometric_axis/z", float(np.mean([np.min(z_boundary), np.max(z_boundary)])), report, ids_name, "/grid/eq/ZMinusZ0_f")
+
+    
 
     return eq
 
