@@ -23,7 +23,10 @@ studies and writes, when available:
       /eqsys/psi_wall, /grid/R0, /grid/r, /grid/eq/*
 
   * summary IDS, when supported by the installed Data Dictionary:
-      /eqsys/I_p, /eqsys/V_loop_w, /eqsys/W_cold, /eqsys/psi_edge
+      /eqsys/I_p, /eqsys/V_loop_w, /eqsys/W_cold, /eqsys/W_i,
+      /eqsys/T_cold, /eqsys/n_tot, /eqsys/n_cold, /eqsys/n_re,
+      /eqsys/j_ohm, /eqsys/j_re, /eqsys/E_field, /other/fluid/Zeff,
+      /grid/R0, /grid/geometry/GR0, /grid/VpVol
 
 Design choices
 --------------
@@ -344,6 +347,14 @@ def common_grids(dream: DreamH5, report: MappingReport) -> dict[str, Any]:
     R2inv  = flatten_1d(dream.arr("/grid/geometry/FSA_R02OverR2", report))
     Bmin   = flatten_1d(dream.arr("/grid/geometry/Bmin", report))
     Bmax   = flatten_1d(dream.arr("/grid/geometry/Bmax", report))
+    FSA_B_over_Bmin = flatten_1d(dream.arr("/grid/geometry/FSA_BOverBmin", report))
+    FSA_B_over_Bmin2 = flatten_1d(dream.arr("/grid/geometry/FSA_BOverBmin2", report))
+    effective_passing_fraction = flatten_1d(
+        dream.arr("/grid/geometry/effectivePassingFraction", report)
+    )
+    xi0_trapped_boundary = flatten_1d(
+        dream.arr("/grid/geometry/xi0TrappedBoundary", report)
+    )
 
     weight_int_area = dr * vpvol * G * R2inv / (2*np.pi*Bmin)
     weight_int_vol  = dr * vpvol * R0
@@ -368,6 +379,13 @@ def common_grids(dream: DreamH5, report: MappingReport) -> dict[str, Any]:
         "a": dream.scalar("/grid/a", None),
         "B0": B0,
         "dVdr": dVdr,
+        "R2inv": R2inv,
+        "Bmin": Bmin,
+        "Bmax": Bmax,
+        "FSA_B_over_Bmin": FSA_B_over_Bmin,
+        "FSA_B_over_Bmin2": FSA_B_over_Bmin2,
+        "effective_passing_fraction": effective_passing_fraction,
+        "xi0_trapped_boundary": xi0_trapped_boundary,
         "weight_int_area": weight_int_area,
         "weight_int_vol": weight_int_vol
     }
@@ -1012,17 +1030,14 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
             elif source:
                 report.missing(source)
 
-    # Fill global_quantities for each time step, if available.
-    weight_int_area = grids.get("weight_int_area")
-    j_RE = dream.arr("/eqsys/j_re")
-    I_RE = np.sum(j_RE * weight_int_area[None,:], axis=1)
 
-    set_path(re_ids, "global_quantities/current", I_RE, report, ids_name, "derived from j_re")
+    j_re = dream.arr("/eqsys/j_re")
+    I_re = current_from_j_trace(j_re, grids, nt)
+
+    set_path(re_ids, "global_quantities/current", I_re, report, ids_name, "derived from j_re")
 
     return re_ids
 
-
-import numpy as np
 
 def cell_center_to_edges(xc):
     """
@@ -1062,6 +1077,98 @@ def dVdpsi_from_dVdr(dVdr, dr, psi):
     return dVdpsi, dpsi, psi_f
 
 
+def flux_surface_profiles_2d(
+    dream: DreamH5,
+    R0: float,
+    Z0: float,
+    psi: np.ndarray,
+    report: MappingReport,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], str]:
+    Rm = dream.arr("/grid/eq/RMinusR0_f")
+    Zm = dream.arr("/grid/eq/ZMinusZ0_f")
+    geometry_source = "/grid/eq/RMinusR0_f, /grid/eq/ZMinusZ0_f"
+    if Rm is None or Zm is None:
+        Rm = dream.arr("/grid/eq/RMinusR0")
+        Zm = dream.arr("/grid/eq/ZMinusZ0")
+        geometry_source = "/grid/eq/RMinusR0, /grid/eq/ZMinusZ0"
+    if Rm is None or Zm is None:
+        return None, None, None, None, geometry_source
+
+    Rm = np.asarray(Rm, dtype=float)
+    Zm = np.asarray(Zm, dtype=float)
+    psi = np.asarray(psi, dtype=float).reshape(-1)
+    if Rm.ndim != 2 or Zm.ndim != 2 or Rm.shape != Zm.shape or psi.size == 0:
+        report.skip(
+            "equilibrium",
+            "time_slice/profiles_2d",
+            "DREAM flux-surface geometry and psi arrays have incompatible shapes",
+            geometry_source,
+        )
+        return None, None, None, None, geometry_source
+
+    if Rm.shape[1] == psi.size + 1:
+        psi_grid = cell_center_to_edges(psi)
+        psi_source = "cell-edge psi derived from /eqsys/psi_p"
+    elif Rm.shape[1] == psi.size:
+        psi_grid = psi
+        psi_source = "/eqsys/psi_p"
+    else:
+        report.skip(
+            "equilibrium",
+            "time_slice/profiles_2d",
+            f"radial geometry size {Rm.shape[1]} does not match psi size {psi.size}",
+            f"{geometry_source} and /eqsys/psi_p",
+        )
+        return None, None, None, None, geometry_source
+
+    theta = flatten_1d(dream.arr("/grid/eq/theta"))
+    if theta is None or theta.size != Rm.shape[0]:
+        theta = np.linspace(0.0, 2.0 * np.pi, Rm.shape[0], endpoint=False)
+
+    r_2d = (R0 + Rm).T
+    z_2d = (Z0 + Zm).T
+
+    return psi_grid, theta, r_2d, z_2d, f"{geometry_source}; {psi_source}"
+
+
+def fill_equilibrium_profiles_2d(
+    ts: Any,
+    dream: DreamH5,
+    R0: float,
+    Z0: float,
+    psi: np.ndarray,
+    report: MappingReport,
+    ids_name: str,
+) -> None:
+    if not resize_child_aos(ts, "profiles_2d", 1):
+        report.skip(ids_name, "time_slice/profiles_2d", "could not resize AoS", "")
+        return
+
+    psi_grid, theta, r_2d, z_2d, source = flux_surface_profiles_2d(dream, R0, Z0, psi, report)
+    if psi_grid is None or theta is None or r_2d is None or z_2d is None:
+        return
+
+    p2d = ts.profiles_2d[0]
+    set_path(p2d, "type/name", "total", report, ids_name, "equilibrium_profiles_2d_identifier")
+    set_path(p2d, "type/index", 0, report, ids_name, "equilibrium_profiles_2d_identifier")
+    set_path(p2d, "type/description", "Total fields", report, ids_name, "equilibrium_profiles_2d_identifier")
+    set_path(p2d, "grid_type/name", "inverse_psi_polar", report, ids_name, "poloidal_plane_coordinates_identifier")
+    set_path(p2d, "grid_type/index", 13, report, ids_name, "poloidal_plane_coordinates_identifier")
+    set_path(
+        p2d,
+        "grid_type/description",
+        "Flux-surface grid with psi as radial label and DREAM poloidal angle as dim2",
+        report,
+        ids_name,
+        "poloidal_plane_coordinates_identifier",
+    )
+    set_path(p2d, "grid/dim1", psi_grid, report, ids_name, "/eqsys/psi_p")
+    set_path(p2d, "grid/dim2", theta, report, ids_name, "/grid/eq/theta")
+    set_path(p2d, "r", r_2d, report, ids_name, source)
+    set_path(p2d, "z", z_2d, report, ids_name, source)
+    set_path(p2d, "psi", np.repeat(psi_grid[:, np.newaxis], theta.size, axis=1), report, ids_name, source)
+
+
 def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
     ids_name = "equilibrium"
     eq = make_ids(factory, ids_name, report)
@@ -1096,17 +1203,82 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
 
     R_outboard = grids["R_outboard"] 
     dVdr = grids.get("dVdr")
-    
+    Bmin = grids.get("Bmin")
+    Bmax = grids.get("Bmax")
+    FSA_B_over_Bmin = grids.get("FSA_B_over_Bmin")
+    FSA_B_over_Bmin2 = grids.get("FSA_B_over_Bmin2")
+    R2inv = grids.get("R2inv")
+    effective_passing_fraction = grids.get("effective_passing_fraction")
+
+    b_field_average = None
+    if Bmin is not None and FSA_B_over_Bmin is not None:
+        b_field_average = Bmin * FSA_B_over_Bmin
+
+    gm1 = None
+    if R2inv is not None and R0 != 0.0:
+        gm1 = R2inv / R0**2
+
+    gm5 = None
+    if Bmin is not None and FSA_B_over_Bmin2 is not None:
+        gm5 = Bmin**2 * FSA_B_over_Bmin2
+
+    trapped_fraction = None
+    trapped_fraction_source = ""
+    if effective_passing_fraction is not None:
+        trapped_fraction = np.clip(1.0 - effective_passing_fraction, 0.0, 1.0)
+        trapped_fraction_source = "derived from /grid/geometry/effectivePassingFraction"
+
     for it in range(nt):
         ts = eq.time_slice[it]
         set_path(ts, "time", time[it], report, ids_name, "/grid/t")
         if ip is not None and it < len(ip):
             set_path(ts, "global_quantities/ip", float(ip[it]), report, ids_name, "/eqsys/I_p")
         
-        set_path(ts, "profilesls_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
+        set_path(ts, "profiles_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
         set_path(ts, "profiles_1d/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
         set_path(ts, "profiles_1d/phi_tor", phi_tor, report, ids_name, "derived from phi_tor")
         set_path(ts, "profiles_1d/r_outboard", R_outboard, report, ids_name, "derived from R0 and r")
+
+        if Bmin is not None:
+            set_path(ts, "profiles_1d/b_field_min", Bmin, report, ids_name, "/grid/geometry/Bmin")
+        if Bmax is not None:
+            set_path(ts, "profiles_1d/b_field_max", Bmax, report, ids_name, "/grid/geometry/Bmax")
+        if b_field_average is not None:
+            set_path(
+                ts,
+                "profiles_1d/b_field_average",
+                b_field_average,
+                report,
+                ids_name,
+                "derived from /grid/geometry/Bmin and /grid/geometry/FSA_BOverBmin",
+            )
+        if trapped_fraction is not None:
+            set_path(
+                ts,
+                "profiles_1d/trapped_fraction",
+                trapped_fraction,
+                report,
+                ids_name,
+                trapped_fraction_source,
+            )
+        if gm1 is not None:
+            set_path(
+                ts,
+                "profiles_1d/gm1",
+                gm1,
+                report,
+                ids_name,
+                "derived from /grid/geometry/FSA_R02OverR2 and /grid/R0",
+            )
+        if gm5 is not None:
+            set_path(
+                ts,
+                "profiles_1d/gm5",
+                gm5,
+                report,
+                ids_name,
+                "derived from /grid/geometry/Bmin and /grid/geometry/FSA_BOverBmin2",
+            )
 
         if j_tot is not None:
             set_path(ts, "profiles_1d/j_phi", j_tot[it], report, ids_name, "/eqsys/j_tot")
@@ -1126,14 +1298,13 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
             dVdpsi, dpsi, psi_f = dVdpsi_from_dVdr(dVdr, dr, psi_arr)
 
             set_path(ts, "profiles_1d/dvolume_dpsi", dVdpsi, report, ids_name, "derived")
+            fill_equilibrium_profiles_2d(ts, dream, R0, Z0, psi_arr, report, ids_name)
 
         if r_boundary is not None and z_boundary is not None:
             set_path(ts, "boundary/outline/r", r_boundary, report, ids_name, "/grid/eq/RMinusR0_f[:,-1] + R0")
             set_path(ts, "boundary/outline/z", z_boundary, report, ids_name, "/grid/eq/ZMinusZ0_f[:,-1] + Z0")
             set_path(ts, "boundary/geometric_axis/r", float(np.mean([np.min(r_boundary), np.max(r_boundary)])), report, ids_name, "/grid/eq/RMinusR0_f")
             set_path(ts, "boundary/geometric_axis/z", float(np.mean([np.min(z_boundary), np.max(z_boundary)])), report, ids_name, "/grid/eq/ZMinusZ0_f")
-
-    
 
     return eq
 
@@ -1159,33 +1330,182 @@ def boundary_outline(dream: DreamH5, R0: float, Z0: float) -> tuple[Optional[np.
     return r_outline, z_outline
 
 
+def scalar_time_trace(data: Optional[np.ndarray], nt: int) -> Optional[np.ndarray]:
+    aligned = time_aligned(data, nt)
+    if aligned is None:
+        return None
+    arr = np.asarray(aligned, dtype=float)
+    if arr.ndim == 1:
+        return arr
+    if arr.ndim == 2 and arr.shape[1] == 1:
+        return arr[:, 0]
+    return None
+
+
+def radial_profile_trace(data: Optional[np.ndarray], nt: int) -> Optional[np.ndarray]:
+    aligned = time_aligned(data, nt)
+    if aligned is None:
+        return None
+    arr = np.asarray(aligned, dtype=float)
+    if arr.ndim == 2:
+        return arr
+    return None
+
+
+def radial_sample_trace(data: Optional[np.ndarray], nt: int, index: int) -> Optional[np.ndarray]:
+    arr = radial_profile_trace(data, nt)
+    if arr is None or arr.shape[1] == 0:
+        return None
+    return arr[:, index]
+
+
+def volume_weights(grids: dict[str, Any]) -> Optional[np.ndarray]:
+    dVdr = grids.get("dVdr")
+    dr = grids.get("dr")
+    if dVdr is None or dr is None:
+        return None
+    weights = np.asarray(dVdr, dtype=float) * np.asarray(dr, dtype=float)
+    if weights.ndim != 1 or weights.size == 0 or not np.any(np.isfinite(weights)):
+        return None
+    return weights
+
+
+def volume_average_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
+    arr = radial_profile_trace(data, nt)
+    weights = volume_weights(grids)
+    if arr is None or weights is None or arr.shape[1] != weights.size:
+        return None
+    denom = np.sum(weights)
+    if denom == 0:
+        return None
+    return np.sum(arr * weights[None, :], axis=1) / denom
+
+
+def volume_integral_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
+    aligned = time_aligned(data, nt)
+    weights = volume_weights(grids)
+    if aligned is None or weights is None:
+        return None
+    arr = np.asarray(aligned, dtype=float)
+    if arr.ndim == 2 and arr.shape[1] == weights.size:
+        return np.sum(arr * weights[None, :], axis=1)
+    if arr.ndim == 3 and arr.shape[-1] == weights.size:
+        return np.sum(arr * weights[None, None, :], axis=(1, 2))
+    return None
+
+
+def minor_radius_average_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
+    arr = radial_profile_trace(data, nt)
+    r = grids.get("r")
+    if arr is None or r is None:
+        return None
+    r = np.asarray(r, dtype=float)
+    if r.ndim != 1 or r.size != arr.shape[1] or r.size < 2:
+        return None
+    length = r[-1] - r[0]
+    if length == 0:
+        return None
+    return np.trapz(arr, r, axis=1) / length
+
+
+def current_from_j_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
+    arr = radial_profile_trace(data, nt)
+    weight_int_area = grids.get("weight_int_area")
+    if arr is None or weight_int_area is None:
+        return None
+    weights = np.asarray(weight_int_area, dtype=float)
+    if weights.ndim != 1 or weights.size != arr.shape[1]:
+        return None
+    return np.sum(arr * weights[None, :], axis=1)
+
+
 def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
     ids_name = "summary"
     summary = make_ids(factory, ids_name, report)
     if summary is None:
         return None
     time = grids["time"]
+    nt = len(time)
     set_path(summary, "time", time, report, ids_name, "/grid/t")
-    fields = {
-        "global_quantities/ip/value": ("/eqsys/I_p", dream.arr("/eqsys/I_p")),
-        "global_quantities/v_loop/value": ("/eqsys/V_loop_w", dream.arr("/eqsys/V_loop_w")),
-        "global_quantities/energy_diamagnetic/value": ("/eqsys/W_cold", dream.arr("/eqsys/W_cold")),
-        "global_quantities/psi_boundary/value": ("/eqsys/psi_edge", dream.arr("/eqsys/psi_edge")),
+
+    ip = scalar_time_trace(dream.arr("/eqsys/I_p"), nt)
+    psi_edge = scalar_time_trace(dream.arr("/eqsys/psi_edge"), nt)
+    n_tot = dream.arr("/eqsys/n_tot")
+    n_cold = dream.arr("/eqsys/n_cold")
+    n_e_source = "/eqsys/n_tot"
+    if n_tot is None:
+        n_tot = n_cold
+        n_e_source = "/eqsys/n_cold"
+    n_re = dream.arr("/eqsys/n_re")
+    t_cold = dream.arr("/eqsys/T_cold")
+    e_field = dream.arr("/eqsys/E_field")
+    zeff = dream.arr("/other/fluid/Zeff")
+    j_ohm = dream.arr("/eqsys/j_ohm")
+    j_re = dream.arr("/eqsys/j_re")
+    w_cold = dream.arr("/eqsys/W_cold")
+    w_i = dream.arr("/eqsys/W_i")
+
+    if ip is not None:
+        set_path(summary, "global_quantities/ip/value", ip, report, ids_name, "/eqsys/I_p")
+   
+    i_ohm = current_from_j_trace(j_ohm, grids, nt)
+    i_re = current_from_j_trace(j_re, grids, nt)
+    if i_ohm is not None:
+        set_path(summary, "global_quantities/current_ohm/value", i_ohm, report, ids_name, "derived from /eqsys/j_ohm")
+  
+    e_cold = volume_integral_trace(w_cold, grids, nt)
+    e_ion = volume_integral_trace(w_i, grids, nt)
+    e_thermal = None
+    if e_cold is not None and e_ion is not None:
+        e_thermal = e_cold + e_ion
+    elif e_cold is not None:
+        e_thermal = e_cold
+    if e_cold is not None:
+        set_path(summary, "global_quantities/energy_electrons_thermal/value", e_cold, report, ids_name, "volume integral of /eqsys/W_cold")
+    if e_ion is not None:
+        set_path(summary, "global_quantities/energy_ion_total_thermal/value", e_ion, report, ids_name, "volume integral of /eqsys/W_i")
+    if e_thermal is not None:
+        set_path(summary, "global_quantities/energy_thermal/value", e_thermal, report, ids_name, "volume integral of /eqsys/W_cold plus /eqsys/W_i when available")
+
+    # Compatibility with older DD versions that carried psi here.
+    if psi_edge is not None:
+        set_path(summary, "global_quantities/psi_boundary/value", psi_edge, report, ids_name, "/eqsys/psi_edge")
+
+    n_e_volume_average = volume_average_trace(n_tot, grids, nt)
+    t_e_volume_average = volume_average_trace(t_cold, grids, nt)
+    zeff_volume_average = volume_average_trace(zeff, grids, nt)
+    if t_e_volume_average is not None:
+        set_path(summary, "volume_average/t_e/value", t_e_volume_average, report, ids_name, "volume average of /eqsys/T_cold")
+    if n_e_volume_average is not None:
+        set_path(summary, "volume_average/n_e/value", n_e_volume_average, report, ids_name, f"volume average of {n_e_source}")
+    if zeff_volume_average is not None:
+        set_path(summary, "volume_average/zeff/value", zeff_volume_average, report, ids_name, "volume average of /other/fluid/Zeff")
+
+    local_profiles = {
+        "t_e": (t_cold, "/eqsys/T_cold"),
+        "n_e": (n_tot, n_e_source),
+        "n_e_thermal": (n_cold, "/eqsys/n_cold"),
+        "n_e_runaway": (n_re, "/eqsys/n_re"),
+        "zeff": (zeff, "/other/fluid/Zeff"),
+        "e_field_parallel": (e_field, "/eqsys/E_field"),
     }
-    for target, (source, data) in fields.items():
-        if data is None:
-            report.missing(source)
-            continue
-        arr = np.asarray(data)
-        if arr.ndim > 1:
-            if arr.shape[1] == 1:
-                arr = arr[:, 0]
-            else:
-                # For W_cold, use a simple radial sum as a scalar time trace only
-                # if the summary path exists. Prefer users verify against volume metric.
-                arr = np.sum(arr, axis=1)
-                report.warn(f"summary/{target}: radial profile {source} was summed to make a scalar trace.")
-        set_path(summary, target, time_aligned(arr, len(time)), report, ids_name, source)
+    for target, (data, source) in local_profiles.items():
+        axis_value = radial_sample_trace(data, nt, 0)
+        separatrix_value = radial_sample_trace(data, nt, -1)
+        if axis_value is not None:
+            set_path(summary, f"local/magnetic_axis/{target}/value", axis_value, report, ids_name, f"{source}[:,0]")
+        if separatrix_value is not None:
+            set_path(summary, f"local/separatrix/{target}/value", separatrix_value, report, ids_name, f"{source}[:,-1]")
+
+
+    if i_re is not None:
+        set_path(summary, "runaways/current/value", i_re, report, ids_name, "derived from /eqsys/j_re")
+    if i_re is not None and i_re.size > 0:
+        set_path(summary, "runaways/current_phi_max/value", float(np.nanmax(np.abs(i_re))), report, ids_name, "maximum absolute derived runaway current")
+    runaway_particles = volume_integral_trace(n_re, grids, nt)
+    if runaway_particles is not None:
+        set_path(summary, "runaways/particles/value", runaway_particles, report, ids_name, "volume integral of /eqsys/n_re")
+
     return summary
 
 
