@@ -1100,50 +1100,268 @@ def dream_spi_velocity_to_imas_rz(vxyz: np.ndarray) -> tuple[np.ndarray, np.ndar
     return vx, vy
 
 
-def map_spi_species(parent: Any, dream: DreamH5, report: MappingReport, ids_name: str, source_prefix: str) -> None:
-    z_raw = dream.arr("/settings/eqsys/spi/ZsDrift")
-    isotope_raw = dream.arr("/settings/eqsys/spi/isotopesDrift")
+@dataclass
+class SpiComponent:
+    label: str
+    z: int
+    isotope: int | None
+    atoms_n: float | None
+    source: str
+
+
+@dataclass
+class SpiInjectorGroup:
+    shard_indices: np.ndarray
+    fractions: np.ndarray | None
+    source: str
+
+
+def spi_display_label(label: str, z: int, isotope: int | None) -> str:
+    base = base_species_label(label) or element_label_from_z(z)
+    if z == 1 and isotope == 1:
+        return "H"
+    if z == 1 and isotope == 2:
+        return "D"
+    if z == 1 and isotope == 3:
+        return "T"
+    return base if expected_z_from_label(base) == z else element_label_from_z(z)
+
+
+def spi_components_from_settings(dream: DreamH5, report: MappingReport) -> list[SpiComponent]:
     atoms_raw = dream.arr("/settings/eqsys/spi/init/Ninj")
-    if z_raw is None:
+    atoms_arr = flatten_1d(atoms_raw)
+    n_components = int(atoms_arr.size) if atoms_arr is not None else 0
+
+    names_raw = dream.arr("/settings/eqsys/n_i/names")
+    names = parse_dream_string_list(names_raw)
+    injected_names = [(i, name) for i, name in enumerate(names) if "_inj" in name]
+
+    n_i_z = flatten_1d(dream.arr("/settings/eqsys/n_i/Z"))
+    n_i_isotopes = flatten_1d(dream.arr("/settings/eqsys/n_i/isotopes"))
+
+    spi_z = flatten_1d(dream.arr("/settings/eqsys/spi/ZsDrift"))
+    spi_isotopes = flatten_1d(dream.arr("/settings/eqsys/spi/isotopesDrift"))
+
+    if n_components == 0 and spi_z is not None:
+        n_components = int(spi_z.size)
+        atoms_arr = np.full((n_components,), np.nan)
+
+    components: list[SpiComponent] = []
+    use_injected_names = n_components > 0 and len(injected_names) == n_components
+
+    for i in range(n_components):
+        atoms = None
+        if atoms_arr is not None and i < atoms_arr.size and np.isfinite(atoms_arr[i]):
+            atoms = float(atoms_arr[i])
+
+        label = ""
+        z: int | None = None
+        isotope: int | None = None
+        source = "/settings/eqsys/spi/init/Ninj"
+
+        if use_injected_names:
+            name_index, label = injected_names[i]
+            source = "/settings/eqsys/n_i/names, /settings/eqsys/spi/init/Ninj"
+            if n_i_z is not None and name_index < n_i_z.size:
+                z = int(n_i_z[name_index])
+            if n_i_isotopes is not None and name_index < n_i_isotopes.size:
+                raw_isotope = int(n_i_isotopes[name_index])
+                isotope = raw_isotope if raw_isotope > 0 else None
+
+        if z is None and label:
+            z = expected_z_from_label(label)
+
+        if z is None and spi_z is not None and spi_z.size > 0:
+            z = int(spi_z[min(i, spi_z.size - 1)])
+            source = "/settings/eqsys/spi/ZsDrift, /settings/eqsys/spi/init/Ninj"
+
+        if z is None:
+            report.warn(f"Could not infer SPI component {i} species; skipping it.")
+            continue
+
+        if isotope is None and spi_z is not None and spi_isotopes is not None:
+            matches = np.flatnonzero(np.asarray(spi_z, dtype=int) == z)
+            if matches.size > 0 and matches[0] < spi_isotopes.size:
+                raw_isotope = int(spi_isotopes[matches[0]])
+                isotope = raw_isotope if raw_isotope > 0 else None
+
+        if not label:
+            label = element_label_from_z(z)
+
+        isotope = infer_isotope_mass_number(label, z, isotope, set(), set())
+        components.append(SpiComponent(label=label, z=z, isotope=isotope, atoms_n=atoms, source=source))
+
+    return components
+
+
+def spi_molar_fraction_matrix(
+    dream: DreamH5,
+    n_components: int,
+    n_shards: int,
+    report: MappingReport,
+) -> np.ndarray | None:
+    raw = flatten_1d(dream.arr("/settings/eqsys/n_i/SPIMolarFraction"))
+    if raw is None or n_components <= 0 or n_shards <= 0:
+        return None
+
+    expected = n_components * n_shards
+    if raw.size == expected + 1 and raw[0] < 0:
+        values = raw[1:]
+    elif raw.size == expected:
+        values = raw
+    else:
+        report.warn(
+            "/settings/eqsys/n_i/SPIMolarFraction has incompatible size "
+            f"{raw.size}; expected {expected} or {expected + 1}. Falling back to one SPI injector."
+        )
+        return None
+
+    return np.asarray(values, dtype=float).reshape(n_components, n_shards)
+
+
+def spi_injector_groups(dream: DreamH5, components: list[SpiComponent], n_shards: int, report: MappingReport) -> list[SpiInjectorGroup]:
+    fractions = spi_molar_fraction_matrix(dream, len(components), n_shards, report)
+    if fractions is None:
+        return [
+            SpiInjectorGroup(
+                shard_indices=np.arange(n_shards, dtype=int),
+                fractions=None,
+                source="/settings/eqsys/spi/ZsDrift, /settings/eqsys/spi/init/Ninj",
+            )
+        ]
+
+    shard_fractions = fractions.T
+    rounded = np.round(shard_fractions, 9)
+    groups: list[SpiInjectorGroup] = []
+    start = 0
+    for ish in range(1, n_shards):
+        if not np.array_equal(rounded[ish], rounded[ish - 1]):
+            group_fraction = np.mean(shard_fractions[start:ish], axis=0)
+            groups.append(
+                SpiInjectorGroup(
+                    shard_indices=np.arange(start, ish, dtype=int),
+                    fractions=group_fraction,
+                    source="/settings/eqsys/n_i/SPIMolarFraction",
+                )
+            )
+            start = ish
+
+    group_fraction = np.mean(shard_fractions[start:n_shards], axis=0)
+    groups.append(
+        SpiInjectorGroup(
+            shard_indices=np.arange(start, n_shards, dtype=int),
+            fractions=group_fraction,
+            source="/settings/eqsys/n_i/SPIMolarFraction",
+        )
+    )
+
+    valid_groups = [group for group in groups if group.shard_indices.size > 0 and np.any(np.abs(group.fractions) > 1e-12)]
+    if not valid_groups:
+        report.warn("SPI molar fraction data did not contain non-zero shard compositions; falling back to one injector.")
+        return [
+            SpiInjectorGroup(
+                shard_indices=np.arange(n_shards, dtype=int),
+                fractions=None,
+                source="/settings/eqsys/spi/ZsDrift, /settings/eqsys/spi/init/Ninj",
+            )
+        ]
+    return valid_groups
+
+
+def spi_group_component_weights(
+    groups: list[SpiInjectorGroup],
+    n_components: int,
+    initial_volume: np.ndarray | None,
+) -> np.ndarray:
+    weights = np.zeros((len(groups), n_components), dtype=float)
+    for igroup, group in enumerate(groups):
+        if group.fractions is None:
+            weights[igroup, :] = 1.0
+            continue
+        shard_weight = np.ones(group.shard_indices.size, dtype=float)
+        if initial_volume is not None and initial_volume.size > int(np.max(group.shard_indices)):
+            shard_weight = np.asarray(initial_volume[group.shard_indices], dtype=float)
+        for icomp in range(n_components):
+            weights[igroup, icomp] = float(np.sum(shard_weight * max(float(group.fractions[icomp]), 0.0)))
+    return weights
+
+
+def map_spi_species(
+    parent: Any,
+    components: list[SpiComponent],
+    group: SpiInjectorGroup,
+    component_weights: np.ndarray,
+    group_index: int,
+    initial_volume: np.ndarray | None,
+    report: MappingReport,
+    ids_name: str,
+    source_prefix: str,
+) -> None:
+    if not components:
         return
 
-    z_list = [int(z) for z in np.asarray(z_raw).reshape(-1)]
-    isotope_arr = np.asarray(isotope_raw).reshape(-1) if isotope_raw is not None else np.full((len(z_list),), -1)
-    atoms_arr = np.asarray(atoms_raw, dtype=float).reshape(-1) if atoms_raw is not None else None
+    active: list[tuple[int, SpiComponent, float, float | None]] = []
+    if group.fractions is None:
+        for icomp, component in enumerate(components):
+            atoms = component.atoms_n
+            fraction = None
+            active.append((icomp, component, 1.0, atoms))
+    else:
+        component_totals = np.sum(component_weights, axis=0)
+        for icomp, component in enumerate(components):
+            fraction = float(group.fractions[icomp])
+            if abs(fraction) <= 1e-12:
+                continue
+            atoms = None
+            if component.atoms_n is not None and icomp < component_totals.size and component_totals[icomp] > 0.0:
+                atoms = float(component.atoms_n * component_weights[group_index, icomp] / component_totals[icomp])
+            active.append((icomp, component, fraction, atoms))
 
-    if atoms_arr is not None:
-        set_path(parent, "atoms_n", float(np.sum(atoms_arr)), report, ids_name, "/settings/eqsys/spi/init/Ninj")
-    if not resize_child_aos(parent, "species", len(z_list)):
-        report.skip(ids_name, f"{source_prefix}/species", "could not resize AoS", "/settings/eqsys/spi/ZsDrift")
+    atoms_values = [atoms for _, _, _, atoms in active if atoms is not None]
+    total_atoms = float(np.sum(atoms_values)) if atoms_values and np.sum(atoms_values) > 0.0 else None
+    if total_atoms is not None:
+        set_path(parent, "atoms_n", total_atoms, report, ids_name, "/settings/eqsys/spi/init/Ninj")
+
+    total_volume = None
+    if initial_volume is not None and group.shard_indices.size > 0:
+        max_index = int(np.max(group.shard_indices))
+        if initial_volume.size > max_index:
+            volume_sum = float(np.sum(initial_volume[group.shard_indices]))
+            if volume_sum > 0.0:
+                total_volume = volume_sum
+
+    if not resize_child_aos(parent, "species", len(active)):
+        report.skip(ids_name, f"{source_prefix}/species", "could not resize AoS", group.source)
         return
 
-    total_atoms = float(np.sum(atoms_arr)) if atoms_arr is not None and np.sum(atoms_arr) > 0 else None
-    for i, z in enumerate(z_list):
-        isotope = int(isotope_arr[i]) if i < isotope_arr.size and isotope_arr[i] > 0 else None
-        if isotope is None:
-            isotope = infer_isotope_mass_number("", z, None, set(), set())
-        label = element_label_from_z(z)
-        if z == 1 and isotope == 2:
-            label = "D"
-        elif z == 1 and isotope == 3:
-            label = "T"
+    fraction_sum = None
+    if group.fractions is not None:
+        fraction_sum = float(np.sum([max(fraction, 0.0) for _, _, fraction, _ in active]))
 
-        
+    for ispecies, (_, component, fraction, atoms) in enumerate(active):
+        label = spi_display_label(component.label, component.z, component.isotope)
+        species = parent.species[ispecies]
+        set_path(species, "name", label, report, ids_name, component.source)
+        set_path(species, "label", label, report, ids_name, component.source)
+        set_path(species, "z_n", float(component.z), report, ids_name, component.source)
+        if component.isotope is not None:
+            set_path(species, "a", float(component.isotope), report, ids_name, component.source)
 
-        species = parent.species[i]
-        set_path(species, "name", label, report, ids_name, "/settings/eqsys/spi/ZsDrift")
-        set_path(species, "label", label, report, ids_name, "/settings/eqsys/spi/ZsDrift")
-        set_path(species, "z_n", float(z), report, ids_name, "/settings/eqsys/spi/ZsDrift")
-        if isotope is not None:
-            set_path(species, "a", float(isotope), report, ids_name, "/settings/eqsys/spi/isotopesDrift")
-        if atoms_arr is not None and i < atoms_arr.size and total_atoms is not None:
-            set_path(
-                species,
-                "density",
-                float(atoms_arr[i] / total_atoms),
-                report,
+        mixture_fraction = None
+        if group.fractions is not None and fraction_sum is not None and fraction_sum > 0.0:
+            mixture_fraction = float(max(fraction, 0.0) / fraction_sum)
+        elif atoms is not None and total_atoms is not None:
+            mixture_fraction = float(atoms / total_atoms)
+
+        if mixture_fraction is not None and total_atoms is not None and total_volume is not None:
+            density = float(total_atoms / total_volume * mixture_fraction)
+            set_path(species, "density", density, report, ids_name, f"{group.source}, /eqsys/Y_p or /settings/eqsys/spi/init/rp")
+        elif mixture_fraction is not None:
+            report.skip(
                 ids_name,
-                "/settings/eqsys/spi/init/Ninj",
+                f"{source_prefix}/species/{ispecies}/density",
+                "cannot compute atomic density without pellet volume and atoms_n",
+                f"{group.source}, /settings/eqsys/spi/init/Ninj",
             )
 
 
@@ -1185,45 +1403,72 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
         return spi
 
     nshards = x_p.shape[1] if x_p is not None else y_p.shape[1]
-    if not resize_child_aos(spi, "injector", 1):
-        report.skip(ids_name, "injector", "could not resize AoS", "")
-        return spi
-
-    injector = spi.injector[0]
-    set_path(injector, "name", "DREAM_SPI", report, ids_name, "DREAM SPI")
-    set_path(injector, "description", "Shattered pellet injection reconstructed from DREAM shard state", report, ids_name, "DREAM SPI")
-
-    if hasattr(injector, "pellet") and hasattr(injector.pellet, "core"):
-        map_spi_species(injector.pellet.core, dream, report, ids_name, "injector/pellet/core")
-
-    # this should be set only for the very first DREAM file of the simulation
-    if v_p is not None:
-        vr0, vz0 = dream_spi_velocity_to_imas_rz(v_p[0])
-        set_path(injector, "velocity_mass_centre_fragments_r", float(np.mean(vr0)), report, ids_name, "/eqsys/v_p[0]")
-        set_path(injector, "velocity_mass_centre_fragments_z", float(np.mean(vz0)), report, ids_name, "/eqsys/v_p[0]")
-
-    if not resize_child_aos(injector, "fragment", nshards):
-        report.skip(ids_name, "injector/fragment", "could not resize AoS", "/eqsys/x_p,/eqsys/Y_p")
-        return spi
-
 
     volume = None
     if y_p is not None:
         radius = np.maximum(y_p, 0.0) ** (3.0 / 5.0)
         volume = (4.0 / 3.0) * np.pi * radius**3
 
-    for ish in range(nshards):
-        fragment = injector.fragment[ish]
-        if x_p is not None:
-            r, z = dream_spi_position_to_imas_rz(x_p[:, ish, :], R0)
-            set_path(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
-            set_path(fragment, "position/z", z, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
-        if x_p is not None and v_p is not None and ish < v_p.shape[1]:
-            vr, vz = dream_spi_velocity_to_imas_rz(v_p[:, ish, :])
-            set_path(fragment, "velocity_r", vr, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
-            set_path(fragment, "velocity_z", vz, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
-        if volume is not None and ish < volume.shape[1]:
-            set_path(fragment, "volume", volume[:, ish], report, ids_name, f"/eqsys/Y_p[:,{ish}]")
+    components = spi_components_from_settings(dream, report)
+    groups = spi_injector_groups(dream, components, nshards, report)
+    initial_volume = volume[0] if volume is not None and volume.shape[0] > 0 else None
+    component_weights = spi_group_component_weights(groups, len(components), initial_volume)
+
+    if not resize_child_aos(spi, "injector", len(groups)):
+        report.skip(ids_name, "injector", "could not resize AoS", "")
+        return spi
+
+    for igroup, group in enumerate(groups):
+        injector = spi.injector[igroup]
+        name = "DREAM_SPI" if len(groups) == 1 else f"DREAM_SPI_{igroup + 1}"
+        set_path(injector, "name", name, report, ids_name, "DREAM SPI")
+        set_path(
+            injector,
+            "description",
+            "Shattered pellet injection reconstructed from DREAM shard state",
+            report,
+            ids_name,
+            "DREAM SPI",
+        )
+
+        if hasattr(injector, "pellet") and hasattr(injector.pellet, "core"):
+            map_spi_species(
+                injector.pellet.core,
+                components,
+                group,
+                component_weights,
+                igroup,
+                initial_volume,
+                report,
+                ids_name,
+                f"injector/{igroup}/pellet/core",
+            )
+
+        group_shards = group.shard_indices
+
+        # this should be set only for the very first DREAM file of the simulation
+        if v_p is not None and v_p.shape[1] > int(np.max(group_shards)):
+            vr0, vz0 = dream_spi_velocity_to_imas_rz(v_p[0, group_shards, :])
+            set_path(injector, "velocity_mass_centre_fragments_r", float(np.mean(vr0)), report, ids_name, "/eqsys/v_p[0]")
+            set_path(injector, "velocity_mass_centre_fragments_z", float(np.mean(vz0)), report, ids_name, "/eqsys/v_p[0]")
+
+        if not resize_child_aos(injector, "fragment", group_shards.size):
+            report.skip(ids_name, f"injector/{igroup}/fragment", "could not resize AoS", "/eqsys/x_p,/eqsys/Y_p")
+            continue
+
+        for local_index, ish_raw in enumerate(group_shards):
+            ish = int(ish_raw)
+            fragment = injector.fragment[local_index]
+            if x_p is not None and ish < x_p.shape[1]:
+                r, z = dream_spi_position_to_imas_rz(x_p[:, ish, :], R0)
+                set_path(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+                set_path(fragment, "position/z", z, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+            if v_p is not None and ish < v_p.shape[1]:
+                vr, vz = dream_spi_velocity_to_imas_rz(v_p[:, ish, :])
+                set_path(fragment, "velocity_r", vr, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+                set_path(fragment, "velocity_z", vz, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+            if volume is not None and ish < volume.shape[1]:
+                set_path(fragment, "volume", volume[:, ish], report, ids_name, f"/eqsys/Y_p[:,{ish}]")
 
     return spi
 
