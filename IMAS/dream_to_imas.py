@@ -13,6 +13,10 @@ studies and writes, when available:
       /gammaCompton, /pCrit, /pCritHottail, /EDreic, /Eceff, /Ecfree,
       /Ectot, /other/fluid/W_re
 
+  * spi IDS:
+      /settings/eqsys/spi/init/xp, /vp, /rp, /Ninj,
+      /eqsys/x_p, /v_p, /Y_p
+
   * plasma_profiles IDS:
       /eqsys/T_cold, /eqsys/n_cold, /eqsys/n_tot, /eqsys/n_i,
       /eqsys/j_tot, /eqsys/j_ohm, /eqsys/E_field,
@@ -632,6 +636,24 @@ def infer_isotope_mass_number(
     return None
 
 
+def element_label_from_z(z: int) -> str:
+    element = {
+        1: "H",
+        2: "He",
+        3: "Li",
+        4: "Be",
+        5: "B",
+        6: "C",
+        7: "N",
+        8: "O",
+        9: "F",
+        10: "Ne",
+        18: "Ar",
+        74: "W",
+    }
+    return element.get(int(z), f"Z{int(z)}")
+
+
 def expected_z_from_label(label: str) -> int | None:
     """
     Return nuclear charge inferred from the label prefix, when obvious.
@@ -996,10 +1018,6 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
         report.skip(ids_name, "profiles_1d", "could not resize AoS", "")
         return re_ids
 
-    if not resize_child_aos(re_ids, "global_quantities", nt):
-        report.skip(ids_name, "global_quantities", "could not resize AoS", "")
-        return re_ids
-
     quantities = {
         "density": ("/eqsys/n_re", dream.arr("/eqsys/n_re", report)),
         "current_density": ("/eqsys/j_re", dream.arr("/eqsys/j_re", report)),
@@ -1034,9 +1052,180 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
     j_re = dream.arr("/eqsys/j_re")
     I_re = current_from_j_trace(j_re, grids, nt)
 
-    set_path(re_ids, "global_quantities/current", I_re, report, ids_name, "derived from j_re")
+    set_path(re_ids, "global_quantities/current_phi", I_re, report, ids_name, "derived from j_re")
 
     return re_ids
+
+
+def reshape_spi_vector(data: Optional[np.ndarray], nt: int) -> Optional[np.ndarray]:
+    aligned = time_aligned(data, nt)
+    if aligned is None:
+        return None
+    arr = np.asarray(aligned, dtype=float)
+    if arr.ndim == 3 and arr.shape[-1] == 1:
+        arr = arr[:, :, 0]
+    if arr.ndim == 2 and arr.shape[1] % 3 == 0:
+        return arr.reshape((arr.shape[0], arr.shape[1] // 3, 3))
+    return None
+
+
+def reshape_spi_scalar(data: Optional[np.ndarray], nt: int) -> Optional[np.ndarray]:
+    aligned = time_aligned(data, nt)
+    if aligned is None:
+        return None
+    arr = np.asarray(aligned, dtype=float)
+    if arr.ndim == 3 and arr.shape[-1] == 1:
+        arr = arr[:, :, 0]
+    if arr.ndim == 2:
+        return arr
+    return None
+
+
+def dream_spi_position_to_imas_rz(xyz: np.ndarray, R0: float) -> tuple[np.ndarray, np.ndarray]:
+    """Convert DREAM local SPI coordinates to IMAS R/Z.
+
+    DREAM SPI uses local Cartesian coordinates with origin at the magnetic axis
+    and the xy-plane as the poloidal cross-section. The global toroidal angle
+    is not defined by DREAM's 1D SPI coordinates, so this intentionally does not
+    invent phi.
+    """
+    x = xyz[:, 0]
+    y = xyz[:, 1]
+    return R0 + x, y
+
+
+def dream_spi_velocity_to_imas_rz(vxyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    vx = vxyz[:, 0]
+    vy = vxyz[:, 1]
+    return vx, vy
+
+
+def map_spi_species(parent: Any, dream: DreamH5, report: MappingReport, ids_name: str, source_prefix: str) -> None:
+    z_raw = dream.arr("/settings/eqsys/spi/ZsDrift")
+    isotope_raw = dream.arr("/settings/eqsys/spi/isotopesDrift")
+    atoms_raw = dream.arr("/settings/eqsys/spi/init/Ninj")
+    if z_raw is None:
+        return
+
+    z_list = [int(z) for z in np.asarray(z_raw).reshape(-1)]
+    isotope_arr = np.asarray(isotope_raw).reshape(-1) if isotope_raw is not None else np.full((len(z_list),), -1)
+    atoms_arr = np.asarray(atoms_raw, dtype=float).reshape(-1) if atoms_raw is not None else None
+
+    if atoms_arr is not None:
+        set_path(parent, "atoms_n", float(np.sum(atoms_arr)), report, ids_name, "/settings/eqsys/spi/init/Ninj")
+    if not resize_child_aos(parent, "species", len(z_list)):
+        report.skip(ids_name, f"{source_prefix}/species", "could not resize AoS", "/settings/eqsys/spi/ZsDrift")
+        return
+
+    total_atoms = float(np.sum(atoms_arr)) if atoms_arr is not None and np.sum(atoms_arr) > 0 else None
+    for i, z in enumerate(z_list):
+        isotope = int(isotope_arr[i]) if i < isotope_arr.size and isotope_arr[i] > 0 else None
+        if isotope is None:
+            isotope = infer_isotope_mass_number("", z, None, set(), set())
+        label = element_label_from_z(z)
+        if z == 1 and isotope == 2:
+            label = "D"
+        elif z == 1 and isotope == 3:
+            label = "T"
+
+        
+
+        species = parent.species[i]
+        set_path(species, "name", label, report, ids_name, "/settings/eqsys/spi/ZsDrift")
+        set_path(species, "label", label, report, ids_name, "/settings/eqsys/spi/ZsDrift")
+        set_path(species, "z_n", float(z), report, ids_name, "/settings/eqsys/spi/ZsDrift")
+        if isotope is not None:
+            set_path(species, "a", float(isotope), report, ids_name, "/settings/eqsys/spi/isotopesDrift")
+        if atoms_arr is not None and i < atoms_arr.size and total_atoms is not None:
+            set_path(
+                species,
+                "density",
+                float(atoms_arr[i] / total_atoms),
+                report,
+                ids_name,
+                "/settings/eqsys/spi/init/Ninj",
+            )
+
+
+def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
+    ids_name = "spi"
+    spi = make_ids(factory, ids_name, report)
+    if spi is None:
+        return None
+
+    time = grids["time"]
+    nt = len(time)
+    R0 = float(grids.get("R0") or 0.0)
+    set_path(spi, "time", time, report, ids_name, "/grid/t")
+
+    x_p = reshape_spi_vector(dream.arr("/eqsys/x_p", report), nt)
+    v_p = reshape_spi_vector(dream.arr("/eqsys/v_p", report), nt)
+    y_p = reshape_spi_scalar(dream.arr("/eqsys/Y_p", report), nt)
+
+    if x_p is None:
+        x_init = dream.arr("/settings/eqsys/spi/init/xp", report)
+        if x_init is not None:
+            x_init = np.asarray(x_init, dtype=float).reshape(-1)
+            if x_init.size % 3 == 0:
+                x_p = np.repeat(x_init.reshape(1, x_init.size // 3, 3), nt, axis=0)
+    if v_p is None:
+        v_init = dream.arr("/settings/eqsys/spi/init/vp", report)
+        if v_init is not None:
+            v_init = np.asarray(v_init, dtype=float).reshape(-1)
+            if v_init.size % 3 == 0:
+                v_p = np.repeat(v_init.reshape(1, v_init.size // 3, 3), nt, axis=0)
+    if y_p is None:
+        rp_init = dream.arr("/settings/eqsys/spi/init/rp", report)
+        if rp_init is not None:
+            rp_init = np.asarray(rp_init, dtype=float).reshape(-1)
+            y_p = np.repeat((rp_init**(5.0 / 3.0)).reshape(1, -1), nt, axis=0)
+
+    if x_p is None and y_p is None:
+        report.skip(ids_name, "injector", "no DREAM SPI shard position or radius data found", "/eqsys/x_p,/eqsys/Y_p")
+        return spi
+
+    nshards = x_p.shape[1] if x_p is not None else y_p.shape[1]
+    if not resize_child_aos(spi, "injector", 1):
+        report.skip(ids_name, "injector", "could not resize AoS", "")
+        return spi
+
+    injector = spi.injector[0]
+    set_path(injector, "name", "DREAM_SPI", report, ids_name, "DREAM SPI")
+    set_path(injector, "description", "Shattered pellet injection reconstructed from DREAM shard state", report, ids_name, "DREAM SPI")
+
+    if hasattr(injector, "pellet") and hasattr(injector.pellet, "core"):
+        map_spi_species(injector.pellet.core, dream, report, ids_name, "injector/pellet/core")
+
+    # this should be set only for the very first DREAM file of the simulation
+    if v_p is not None:
+        vr0, vz0 = dream_spi_velocity_to_imas_rz(v_p[0])
+        set_path(injector, "velocity_mass_centre_fragments_r", float(np.mean(vr0)), report, ids_name, "/eqsys/v_p[0]")
+        set_path(injector, "velocity_mass_centre_fragments_z", float(np.mean(vz0)), report, ids_name, "/eqsys/v_p[0]")
+
+    if not resize_child_aos(injector, "fragment", nshards):
+        report.skip(ids_name, "injector/fragment", "could not resize AoS", "/eqsys/x_p,/eqsys/Y_p")
+        return spi
+
+
+    volume = None
+    if y_p is not None:
+        radius = np.maximum(y_p, 0.0) ** (3.0 / 5.0)
+        volume = (4.0 / 3.0) * np.pi * radius**3
+
+    for ish in range(nshards):
+        fragment = injector.fragment[ish]
+        if x_p is not None:
+            r, z = dream_spi_position_to_imas_rz(x_p[:, ish, :], R0)
+            set_path(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+            set_path(fragment, "position/z", z, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+        if x_p is not None and v_p is not None and ish < v_p.shape[1]:
+            vr, vz = dream_spi_velocity_to_imas_rz(v_p[:, ish, :])
+            set_path(fragment, "velocity_r", vr, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+            set_path(fragment, "velocity_z", vz, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+        if volume is not None and ish < volume.shape[1]:
+            set_path(fragment, "volume", volume[:, ish], report, ids_name, f"/eqsys/Y_p[:,{ish}]")
+
+    return spi
 
 
 def cell_center_to_edges(xc):
@@ -1394,20 +1583,6 @@ def volume_integral_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt:
     return None
 
 
-def minor_radius_average_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
-    arr = radial_profile_trace(data, nt)
-    r = grids.get("r")
-    if arr is None or r is None:
-        return None
-    r = np.asarray(r, dtype=float)
-    if r.ndim != 1 or r.size != arr.shape[1] or r.size < 2:
-        return None
-    length = r[-1] - r[0]
-    if length == 0:
-        return None
-    return np.trapz(arr, r, axis=1) / length
-
-
 def current_from_j_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
     arr = radial_profile_trace(data, nt)
     weight_int_area = grids.get("weight_int_area")
@@ -1538,6 +1713,8 @@ def build_ids(dream_file: str, dd_version: str | None, selected: Iterable[str]) 
             ids_list.append(map_plasma_profiles(factory, dream, grids, report))
         if "runaway_electrons" in selected_set:
             ids_list.append(map_runaway_electrons(factory, dream, grids, report))
+        if "spi" in selected_set:
+            ids_list.append(map_spi(factory, dream, grids, report))
         if "equilibrium" in selected_set:
             ids_list.append(map_equilibrium(factory, dream, grids, report))
         if "summary" in selected_set:
@@ -1563,8 +1740,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--ids",
         nargs="+",
-        default=["plasma_profiles", "runaway_electrons", "equilibrium", "summary"],
-        choices=["plasma_profiles", "runaway_electrons", "equilibrium", "summary"],
+        default=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "summary"],
+        choices=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "summary"],
         help="IDSs to create/write.",
     )
     parser.add_argument(
