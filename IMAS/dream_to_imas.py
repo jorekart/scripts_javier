@@ -40,8 +40,8 @@ DREAM and IMAS do not have a perfect one-to-one mapping. This script therefore:
   2. Uses a defensive `set_path()` helper so the same script can run across
      Data Dictionary versions. If a target node does not exist in your DD,
      it is skipped and recorded in the report instead of crashing.
-  3. Writes a JSON mapping report next to the output, including successful,
-     skipped, missing-source, and uncertain mappings.
+  3. Writes an aggregated Markdown mapping report next to the output, including
+     successful, skipped, missing-source, and uncertain mappings.
   4. Keeps values in DREAM units where these match IMAS nodes. DREAM T_cold is
      eV, densities are m^-3, current densities are A m^-2, E_field is V m^-1,
      time is seconds, and r/R0 are metres.
@@ -71,7 +71,9 @@ Only build IDSs and produce a report, without writing:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,28 +107,318 @@ class MappingReport:
     written_uri: Optional[str] = None
     dd_version_requested: Optional[str] = None
     created_ids: list[str] = field(default_factory=list)
-    set_nodes: list[dict[str, str]] = field(default_factory=list)
-    skipped_nodes: list[dict[str, str]] = field(default_factory=list)
-    missing_sources: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    set_nodes: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    skipped_nodes: dict[tuple[str, str, str, str], int] = field(default_factory=dict)
+    missing_sources: dict[str, int] = field(default_factory=dict)
+    warnings: dict[str, int] = field(default_factory=dict)
+    object_paths: dict[int, str] = field(default_factory=dict, repr=False)
 
-    def ok(self, ids: str, target: str, source: str) -> None:
-        self.set_nodes.append({"ids": ids, "target": target, "source": source})
+    def bind(self, obj: Any, node_path: str) -> None:
+        self.object_paths[id(obj)] = normalize_node_path(node_path)
 
-    def skip(self, ids: str, target: str, reason: str, source: str = "") -> None:
-        self.skipped_nodes.append(
-            {"ids": ids, "target": target, "source": source, "reason": reason}
+    def full_node_path(self, ids: str, target: str, root: Any | None = None) -> str:
+        base = self.object_paths.get(id(root), ids) if root is not None else ids
+        target = normalize_report_text(target)
+        if not target:
+            return base
+        return normalize_node_path(f"{base}.{target.replace('/', '.')}")
+
+    def ok(self, ids: str, target: str, source: str, units: str = "", root: Any | None = None) -> None:
+        node = self.full_node_path(ids, target, root)
+        key = (
+            node,
+            units or imas_units_for_node(node),
+            normalize_report_text(source),
         )
+        self.set_nodes[key] = self.set_nodes.get(key, 0) + 1
+
+    def skip(
+        self,
+        ids: str,
+        target: str,
+        reason: str,
+        source: str = "",
+        units: str = "",
+        root: Any | None = None,
+    ) -> None:
+        node = self.full_node_path(ids, target, root)
+        key = (
+            node,
+            units or imas_units_for_node(node),
+            normalize_report_text(source),
+            normalize_report_text(reason),
+        )
+        self.skipped_nodes[key] = self.skipped_nodes.get(key, 0) + 1
 
     def missing(self, source: str) -> None:
-        if source not in self.missing_sources:
-            self.missing_sources.append(source)
+        key = normalize_report_text(source)
+        self.missing_sources[key] = self.missing_sources.get(key, 0) + 1
 
     def warn(self, message: str) -> None:
-        self.warnings.append(message)
+        self.warnings[message] = self.warnings.get(message, 0) + 1
 
     def write(self, path: Path) -> None:
-        path.write_text(json.dumps(self.__dict__, indent=2), encoding="utf-8")
+        if path.suffix.lower() == ".json":
+            self.write_json(path)
+        else:
+            self.write_markdown(path)
+
+    def write_json(self, path: Path) -> None:
+        payload = {
+            "source_file": self.source_file,
+            "written_uri": self.written_uri,
+            "dd_version_requested": self.dd_version_requested,
+            "created_ids": self.created_ids,
+            "set_nodes": [
+                {"node": node, "units": units, "source": source, "count": count}
+                for (node, units, source), count in sorted_report_items(self.set_nodes)
+            ],
+            "skipped_nodes": [
+                {"node": node, "units": units, "source": source, "reason": reason, "count": count}
+                for (node, units, source, reason), count in sorted_report_items(self.skipped_nodes)
+            ],
+            "missing_sources": [
+                {"source": source, "count": count}
+                for source, count in sorted(self.missing_sources.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "warnings": [
+                {"message": message, "count": count}
+                for message, count in sorted(self.warnings.items(), key=lambda item: (-item[1], item[0]))
+            ],
+        }
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def write_markdown(self, path: Path) -> None:
+        lines = [
+            "# DREAM to IMAS Mapping Report",
+            "",
+            "## Summary",
+            "",
+            f"- Source file: `{self.source_file}`",
+            f"- Written URI: `{self.written_uri or '(dry run)'}`",
+            f"- Data Dictionary version requested: `{self.dd_version_requested or '(environment default)'}`",
+            f"- Created IDSs: {', '.join(f'`{ids}`' for ids in self.created_ids) if self.created_ids else '(none)'}",
+            f"- Set mappings: {len(self.set_nodes)} unique, {sum(self.set_nodes.values())} total calls",
+            f"- Skipped mappings: {len(self.skipped_nodes)} unique, {sum(self.skipped_nodes.values())} total calls",
+            f"- Missing sources: {len(self.missing_sources)} unique, {sum(self.missing_sources.values())} total calls",
+            f"- Warnings: {len(self.warnings)} unique, {sum(self.warnings.values())} total calls",
+            "",
+        ]
+
+        lines.extend(markdown_table(
+            "Set Mappings",
+            ["IMAS Node", "Units", "DREAM Source", "Count"],
+            [(node, units, source, str(count)) for (node, units, source), count in sorted_report_items(self.set_nodes)],
+        ))
+        lines.extend(markdown_table(
+            "Skipped Mappings",
+            ["IMAS Node", "Units", "DREAM Source", "Reason", "Count"],
+            [
+                (node, units, source, reason, str(count))
+                for (node, units, source, reason), count in sorted_report_items(self.skipped_nodes)
+            ],
+        ))
+        lines.extend(markdown_table(
+            "Missing Sources",
+            ["Source", "Count"],
+            [(source, str(count)) for source, count in sorted(self.missing_sources.items(), key=lambda item: (-item[1], item[0]))],
+        ))
+        lines.extend(markdown_table(
+            "Warnings",
+            ["Message", "Count"],
+            [(message, str(count)) for message, count in sorted(self.warnings.items(), key=lambda item: (-item[1], item[0]))],
+        ))
+
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def normalize_report_text(text: str) -> str:
+    text = str(text)
+    text = re.sub(r"\[:,\d+,:\]", "[:,*,:]", text)
+    text = re.sub(r"\[:,\d+\]", "[:,*]", text)
+    text = re.sub(r"\[\d+\]", "[*]", text)
+    text = re.sub(r"/\d+(?=/|$)", "/*", text)
+    return text
+
+
+def report_node_path(ids: str, target: str) -> str:
+    target = normalize_report_text(target)
+    if not target:
+        return ids
+    return normalize_node_path(f"{ids}.{target.replace('/', '.')}")
+
+
+def normalize_node_path(node_path: str) -> str:
+    node_path = normalize_report_text(node_path)
+    node_path = node_path.replace("/", ".")
+    node_path = re.sub(r"\.\*?(?=\.|$)", lambda match: ".*" if match.group(0).startswith(".*") else ".", node_path)
+    node_path = re.sub(r"\.+", ".", node_path)
+    return node_path.strip(".")
+
+
+IMAS_UNIT_FALLBACKS = [
+    ("*.name", "n/a"),
+    ("*.label", "n/a"),
+    ("*.description", "n/a"),
+    ("*.index", "1"),
+    ("*.time", "s"),
+    ("*.global_quantities.ip", "A"),
+    ("*.global_quantities.ip.value", "A"),
+    ("*.global_quantities.current", "A"),
+    ("*.global_quantities.current_phi", "A"),
+    ("*.global_quantities.current_ohm.value", "A"),
+    ("*.global_quantities.energy*.value", "J"),
+    ("*.global_quantities.psi*.value", "Wb"),
+    ("*.vacuum_toroidal_field.r0", "m"),
+    ("*.vacuum_toroidal_field.b0", "T"),
+    ("*.profiles_1d.grid.rho_tor_norm", "1"),
+    ("*.profiles_1d.grid.rho_tor", "m"),
+    ("*.profiles_1d.grid.rho_pol_norm", "1"),
+    ("*.profiles_1d.grid.volume", "m^3"),
+    ("*.profiles_1d.grid.area", "m^2"),
+    ("*.profiles_1d.electrons.temperature", "eV"),
+    ("*.profiles_1d.electrons.density*", "m^-3"),
+    ("*.profiles_1d.ion*.density*", "m^-3"),
+    ("*.profiles_1d.neutral*.density*", "m^-3"),
+    ("*.profiles_1d.*.density", "m^-3"),
+    ("*.profiles_1d.current_density*", "A m^-2"),
+    ("*.profiles_1d.j_*", "A m^-2"),
+    ("*.profiles_1d.e_field*", "V m^-1"),
+    ("*.profiles_1d.conductivity*", "Ohm^-1 m^-1"),
+    ("*.profiles_1d.zeff", "1"),
+    ("*.profiles_1d.rho_tor_norm", "1"),
+    ("*.profiles_1d.rho_tor", "m"),
+    ("*.profiles_1d.phi_tor", "Wb"),
+    ("*.profiles_1d.r_outboard", "m"),
+    ("*.profiles_1d.b_field*", "T"),
+    ("*.profiles_1d.trapped_fraction", "1"),
+    ("*.profiles_1d.gm1", "1"),
+    ("*.profiles_1d.gm5", "T^2"),
+    ("*.profiles_1d.momentum_critical*", "kg m s^-1"),
+    ("*.profiles_1d.ddensity_dt*", "m^-3 s^-1"),
+    ("*.boundary.outline.r", "m"),
+    ("*.boundary.outline.z", "m"),
+    ("*.boundary.geometric_axis.r", "m"),
+    ("*.boundary.geometric_axis.z", "m"),
+    ("*.magnetic_axis.r", "m"),
+    ("*.magnetic_axis.z", "m"),
+    ("*.profiles_2d.grid.dim1", "Wb"),
+    ("*.profiles_2d.grid.dim2", "rad"),
+    ("*.profiles_2d.r", "m"),
+    ("*.profiles_2d.z", "m"),
+    ("*.profiles_2d.psi", "Wb"),
+    ("summary.volume_average.t_e.value", "eV"),
+    ("summary.volume_average.n_e.value", "m^-3"),
+    ("summary.volume_average.zeff.value", "1"),
+    ("summary.local.*.t_e.value", "eV"),
+    ("summary.local.*.n_e.value", "m^-3"),
+    ("summary.local.*.n_re.value", "m^-3"),
+    ("summary.local.*.j_ohm.value", "A m^-2"),
+    ("summary.local.*.j_re.value", "A m^-2"),
+    ("summary.local.*.e_field.value", "V m^-1"),
+    ("summary.local.*.zeff.value", "1"),
+    ("spi.injector.pellet.core.atoms_n", "1"),
+    ("spi.injector.pellet.core.species.density", "m^-3"),
+    ("spi.injector.pellet.core.species.z_n", "1"),
+    ("spi.injector.pellet.core.species.a", "1"),
+    ("spi.injector.fragment.position.r", "m"),
+    ("spi.injector.fragment.position.z", "m"),
+    ("spi.injector.fragment.volume", "m^3"),
+    ("spi.injector.fragment.velocity_r", "m s^-1"),
+    ("spi.injector.fragment.velocity_z", "m s^-1"),
+    ("spi.injector.velocity_mass_centre_fragments_r", "m s^-1"),
+    ("spi.injector.velocity_mass_centre_fragments_z", "m s^-1"),
+    ("*.z_n", "1"),
+    ("*.a", "1"),
+    ("*.density", "m^-3"),
+    ("*.temperature", "eV"),
+    ("*.current_density", "A m^-2"),
+    ("*.current", "A"),
+    ("*.e_field*", "V m^-1"),
+    ("*.psi*", "Wb"),
+    ("*.r", "m"),
+    ("*.z", "m"),
+    ("*.volume", "m^3"),
+]
+
+
+def imas_units_for_path(ids: str, target: str) -> str:
+    return imas_units_for_node(report_node_path(ids, target))
+
+
+def imas_units_for_node(node: str) -> str:
+    for pattern, units in IMAS_UNIT_FALLBACKS:
+        if fnmatch.fnmatchcase(node, pattern):
+            return units
+    return ""
+
+
+def imas_units_from_node(node: Any) -> str:
+    for attr in ("units", "unit"):
+        try:
+            value = getattr(node, attr)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+
+    for attr in ("metadata", "_metadata"):
+        try:
+            metadata = getattr(node, attr)
+        except Exception:
+            metadata = None
+        units = metadata_units(metadata)
+        if units:
+            return units
+
+    return ""
+
+
+def metadata_units(metadata: Any) -> str:
+    if metadata is None:
+        return ""
+    if isinstance(metadata, dict):
+        for key in ("units", "unit", "documentation_unit"):
+            value = metadata.get(key)
+            if value:
+                return str(value)
+    for attr in ("units", "unit", "documentation_unit"):
+        try:
+            value = getattr(metadata, attr)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+    return ""
+
+
+def sorted_report_items(items: dict[tuple[str, ...], int]) -> list[tuple[tuple[str, ...], int]]:
+    return sorted(items.items(), key=lambda item: (-item[1], item[0]))
+
+
+def escape_markdown_cell(value: Any) -> str:
+    text = str(value)
+    text = text.replace("\\", "\\\\").replace("|", "\\|")
+    text = text.replace("\n", "<br>")
+    return text
+
+
+def markdown_table(title: str, headers: list[str], rows: list[tuple[Any, ...]], limit: int = 250) -> list[str]:
+    lines = [f"## {title}", ""]
+    if not rows:
+        lines.extend(["No entries.", ""])
+        return lines
+
+    visible_rows = rows[:limit]
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in visible_rows:
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    if len(rows) > limit:
+        lines.extend(["", f"Showing the first {limit} rows of {len(rows)} unique entries.", ""])
+    else:
+        lines.append("")
+    return lines
 
 
 # ----------------------------- HDF5 helpers -------------------------------
@@ -243,12 +535,13 @@ def make_ids(factory: Any, name: str, report: MappingReport):
         report.warn(f"Installed IMAS Data Dictionary does not provide IDS '{name}'.")
         return None
     ids = getattr(factory, name)()
+    report.bind(ids, name)
     report.created_ids.append(name)
     set_homogeneous_time(ids)
     try:
         ids.ids_properties.comment = (
             "Generated from DREAM HDF5 output by dream_to_imas.py. "
-            "Mappings are conservative and reported in the companion JSON file."
+            "Mappings are conservative and reported in the companion mapping report."
         )
     except Exception:
         pass
@@ -282,7 +575,7 @@ def set_path(root: Any, path: str, value: Any, report: MappingReport, ids_name: 
     """
     parts = [p for p in path.split("/") if p]
     if not parts:
-        report.skip(ids_name, path, "empty target path", source)
+        report.skip(ids_name, path, "empty target path", source, root=root)
         return False
     obj = root
     try:
@@ -293,13 +586,15 @@ def set_path(root: Any, path: str, value: Any, report: MappingReport, ids_name: 
                 obj = getattr(obj, part)
         leaf = parts[-1]
         if not hasattr(obj, leaf):
-            report.skip(ids_name, path, "target node is not present in this DD version", source)
+            report.skip(ids_name, path, "target node is not present in this DD version", source, root=root)
             return False
+        full_node_path = report.full_node_path(ids_name, path, root)
+        units = imas_units_from_node(getattr(obj, leaf)) or imas_units_for_node(full_node_path)
         setattr(obj, leaf, sanitize_for_imas(value))
-        report.ok(ids_name, path, source)
+        report.ok(ids_name, path, source, units, root=root)
         return True
     except Exception as exc:
-        report.skip(ids_name, path, f"assignment failed: {type(exc).__name__}: {exc}", source)
+        report.skip(ids_name, path, f"assignment failed: {type(exc).__name__}: {exc}", source, root=root)
         return False
 
 
@@ -473,6 +768,7 @@ def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], rep
 
     for it in range(nt):
         p = pp.profiles_1d[it]
+        report.bind(p, "plasma_profiles.profiles_1d")
         set_path(p, "time", time[it], report, ids_name, "/grid/t")
 
         fill_1d_grid(p, grids, dream, nt, it, report, ids_name)
@@ -762,10 +1058,13 @@ def set_element_atomic_properties(
         profiles_1d.neutral[i].element[0]
     """
     if not hasattr(parent, "element") or not resize_aos(parent.element, 1):
-        report.skip(ids_name, "element", "element AoS not available/resizable", source)
+        report.skip(ids_name, "element", "element AoS not available/resizable", source, root=parent)
         return
 
     element = parent.element[0]
+    parent_path = report.object_paths.get(id(parent))
+    if parent_path:
+        report.bind(element, f"{parent_path}.element")
 
     # IMAS commonly uses z_n for nuclear charge and a for mass number.
     set_path(element, "z_n", float(z), report, ids_name, source)
@@ -917,6 +1216,8 @@ def fill_ion_profiles_1d(
             continue
 
         if has_ion and has_neutral:
+            report.bind(p.ion[iion], "plasma_profiles.profiles_1d.ion")
+            report.bind(p.neutral[iion], "plasma_profiles.profiles_1d.neutral")
             set_path(p.ion[iion], "neutral_index", iion, report, ids_name, "DREAM species index")
             set_path(p.neutral[iion], "ion_index", iion, report, ids_name, "DREAM species index") 
 
@@ -927,6 +1228,7 @@ def fill_ion_profiles_1d(
 
         if has_neutral:
             neutral = p.neutral[iion]
+            report.bind(neutral, "plasma_profiles.profiles_1d.neutral")
 
             set_path(neutral, "label", label, report, ids_name, "/settings/eqsys/n_i/names")
             set_element_atomic_properties(
@@ -944,6 +1246,7 @@ def fill_ion_profiles_1d(
 
             if hasattr(neutral, "state") and resize_aos(neutral.state, 1):
                 nstate = neutral.state[0]
+                report.bind(nstate, "plasma_profiles.profiles_1d.neutral.state")
                 set_path(nstate, "label", f"{label} neutral", report, ids_name, "/ionmeta/names")
                 set_path(nstate, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
 
@@ -954,6 +1257,7 @@ def fill_ion_profiles_1d(
 
         if has_ion:
             ion = p.ion[iion]
+            report.bind(ion, "plasma_profiles.profiles_1d.ion")
 
             set_path(ion, "label", label, report, ids_name, "/settings/eqsys/n_i/names")
             set_element_atomic_properties(
@@ -982,6 +1286,7 @@ def fill_ion_profiles_1d(
             if hasattr(ion, "state") and resize_aos(ion.state, charged_block.shape[0]):
                 for z0 in range(1, block.shape[0]):
                     state = ion.state[z0 - 1]
+                    report.bind(state, "plasma_profiles.profiles_1d.ion.state")
 
                     # Do NOT set z_min/z_max here, per your request.
                     # The charge state is encoded by ordering and label.
@@ -1037,6 +1342,7 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
     # Fill up profiles_1d for each time step
     for it in range(nt):
         p = re_ids.profiles_1d[it]
+        report.bind(p, "runaway_electrons.profiles_1d")
         set_path(p, "time", time[it], report, ids_name, "/grid/t")
 
         fill_1d_grid(p, grids, dream, nt, it, report, ids_name)
@@ -1341,6 +1647,8 @@ def map_spi_species(
     for ispecies, (_, component, fraction, atoms) in enumerate(active):
         label = spi_display_label(component.label, component.z, component.isotope)
         species = parent.species[ispecies]
+        parent_path = report.object_paths.get(id(parent), "spi.injector.pellet.core")
+        report.bind(species, f"{parent_path}.species")
         set_path(species, "name", label, report, ids_name, component.source)
         set_path(species, "label", label, report, ids_name, component.source)
         set_path(species, "z_n", float(component.z), report, ids_name, component.source)
@@ -1420,6 +1728,7 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
 
     for igroup, group in enumerate(groups):
         injector = spi.injector[igroup]
+        report.bind(injector, "spi.injector")
         name = "DREAM_SPI" if len(groups) == 1 else f"DREAM_SPI_{igroup + 1}"
         set_path(injector, "name", name, report, ids_name, "DREAM SPI")
         set_path(
@@ -1432,6 +1741,7 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
         )
 
         if hasattr(injector, "pellet") and hasattr(injector.pellet, "core"):
+            report.bind(injector.pellet.core, "spi.injector.pellet.core")
             map_spi_species(
                 injector.pellet.core,
                 components,
@@ -1459,6 +1769,7 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
         for local_index, ish_raw in enumerate(group_shards):
             ish = int(ish_raw)
             fragment = injector.fragment[local_index]
+            report.bind(fragment, "spi.injector.fragment")
             if x_p is not None and ish < x_p.shape[1]:
                 r, z = dream_spi_position_to_imas_rz(x_p[:, ish, :], R0)
                 set_path(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
@@ -1583,6 +1894,8 @@ def fill_equilibrium_profiles_2d(
         return
 
     p2d = ts.profiles_2d[0]
+    ts_path = report.object_paths.get(id(ts), "equilibrium.time_slice")
+    report.bind(p2d, f"{ts_path}.profiles_2d")
     set_path(p2d, "type/name", "total", report, ids_name, "equilibrium_profiles_2d_identifier")
     set_path(p2d, "type/index", 0, report, ids_name, "equilibrium_profiles_2d_identifier")
     set_path(p2d, "type/description", "Total fields", report, ids_name, "equilibrium_profiles_2d_identifier")
@@ -1664,6 +1977,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
 
     for it in range(nt):
         ts = eq.time_slice[it]
+        report.bind(ts, "equilibrium.time_slice")
         set_path(ts, "time", time[it], report, ids_name, "/grid/t")
         if ip is not None and it < len(ip):
             set_path(ts, "global_quantities/ip", float(ip[it]), report, ids_name, "/eqsys/I_p")
@@ -1997,7 +2311,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--report",
         default=None,
-        help="Path to write JSON mapping report. Default: <uri or input stem>.mapping_report.json",
+        help="Path to write mapping report. Default: <uri or input stem>.mapping_report.md",
     )
     parser.add_argument(
         "--dry-run",
@@ -2012,8 +2326,8 @@ def default_report_path(args: argparse.Namespace) -> Path:
         return Path(args.report)
     uri_name = args.uri.replace(":", "_").replace("?", "_").replace("/", "_").replace(";", "_")
     if uri_name:
-        return Path(f"{uri_name}.mapping_report.json")
-    return Path(args.dream_h5).with_suffix(".mapping_report.json")
+        return Path(f"{uri_name}.mapping_report.md")
+    return Path(args.dream_h5).with_suffix(".mapping_report.md")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2032,11 +2346,18 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Wrote IMAS data entry: {args.uri}")
     print(f"Mapping report: {report_path}")
-    print(f"Set nodes: {len(report.set_nodes)} | Skipped nodes: {len(report.skipped_nodes)} | Missing sources: {len(report.missing_sources)}")
+    print(
+        "Set mappings: "
+        f"{len(report.set_nodes)} unique / {sum(report.set_nodes.values())} calls | "
+        f"Skipped: {len(report.skipped_nodes)} unique / {sum(report.skipped_nodes.values())} calls | "
+        f"Missing sources: {len(report.missing_sources)} unique / {sum(report.missing_sources.values())} calls"
+    )
     if report.warnings:
         print("Warnings:")
-        for w in report.warnings[:10]:
-            print(f"  - {w}")
+        warning_items = sorted(report.warnings.items(), key=lambda item: (-item[1], item[0]))
+        for w, count in warning_items[:10]:
+            suffix = f" ({count}x)" if count > 1 else ""
+            print(f"  - {w}{suffix}")
         if len(report.warnings) > 10:
             print(f"  ... {len(report.warnings) - 10} more warnings in the report")
     return 0
