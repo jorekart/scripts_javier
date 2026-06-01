@@ -32,6 +32,9 @@ studies and writes, when available:
       /eqsys/j_ohm, /eqsys/j_re, /eqsys/E_field, /other/fluid/Zeff,
       /grid/R0, /grid/geometry/GR0, /grid/VpVol
 
+  * radiation IDS, when supported by the installed Data Dictionary:
+      /other/fluid/Tcold_radiation, /grid/r, /grid/t, /grid/VpVol
+
 Design choices
 --------------
 DREAM and IMAS do not have a perfect one-to-one mapping. This script therefore:
@@ -317,6 +320,16 @@ IMAS_UNIT_FALLBACKS = [
     ("summary.local.*.j_re.value", "A m^-2"),
     ("summary.local.*.e_field.value", "V m^-1"),
     ("summary.local.*.zeff.value", "1"),
+    ("radiation.process.identifier.index", "1"),
+    ("radiation.process.identifier.name", "n/a"),
+    ("radiation.process.identifier.description", "n/a"),
+    ("radiation.process.global_quantities.time", "s"),
+    ("radiation.process.global_quantities.inside_vessel.power*", "W"),
+    ("radiation.process.profiles_1d.time", "s"),
+    ("radiation.process.profiles_1d.grid.rho_tor_norm", "1"),
+    ("radiation.process.profiles_1d.grid.rho_tor", "m"),
+    ("radiation.process.profiles_1d.electrons.emissivity", "W m^-3"),
+    ("radiation.process.profiles_1d.electrons.power_inside", "W"),
     ("spi.injector.pellet.core.atoms_n", "1"),
     ("spi.injector.pellet.core.species.density", "m^-3"),
     ("spi.injector.pellet.core.species.z_n", "1"),
@@ -703,7 +716,12 @@ def fill_vacuum_toroidal_field(ids: Any, ids_name: str, grids: dict[str, Any], r
             "dataset was present in the provided DREAM HDF5 structure."
         )
     if B0 is not None:
-        set_path(ids, "vacuum_toroidal_field/b0", B0, report, ids_name, "/grid/B0")
+        time = grids.get("time")
+        if time is not None:
+            b0 = np.full(np.asarray(time, dtype=float).shape, float(B0), dtype=float)
+        else:
+            b0 = float(B0)
+        set_path(ids, "vacuum_toroidal_field/b0", b0, report, ids_name, "/grid/B0")
     else:
         report.warn(
             f"{ids_name}: vacuum_toroidal_field/b0 was not filled because no explicit B0 "
@@ -1072,9 +1090,6 @@ def set_element_atomic_properties(
     if A is not None:
         set_path(element, "a", float(A), report, ids_name, source)
 
-    # Useful when available in the DD version.
-    set_path(element, "label", label, report, ids_name, source)
-
 
 def fill_ion_profiles_1d(
     p: Any,
@@ -1230,7 +1245,6 @@ def fill_ion_profiles_1d(
             neutral = p.neutral[iion]
             report.bind(neutral, "plasma_profiles.profiles_1d.neutral")
 
-            set_path(neutral, "label", label, report, ids_name, "/settings/eqsys/n_i/names")
             set_element_atomic_properties(
                 neutral,
                 label=label,
@@ -1247,7 +1261,6 @@ def fill_ion_profiles_1d(
             if hasattr(neutral, "state") and resize_aos(neutral.state, 1):
                 nstate = neutral.state[0]
                 report.bind(nstate, "plasma_profiles.profiles_1d.neutral.state")
-                set_path(nstate, "label", f"{label} neutral", report, ids_name, "/ionmeta/names")
                 set_path(nstate, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
 
         # ------------------------------------------------------------
@@ -1259,7 +1272,7 @@ def fill_ion_profiles_1d(
             ion = p.ion[iion]
             report.bind(ion, "plasma_profiles.profiles_1d.ion")
 
-            set_path(ion, "label", label, report, ids_name, "/settings/eqsys/n_i/names")
+            set_path(ion, "name", label, report, ids_name, "/settings/eqsys/n_i/names")
             set_element_atomic_properties(
                 ion,
                 label=label,
@@ -1292,7 +1305,7 @@ def fill_ion_profiles_1d(
                     # The charge state is encoded by ordering and label.
                     set_path(
                         state,
-                        "label",
+                        "name",
                         f"{label} Z0={z0}",
                         report,
                         ids_name,
@@ -1650,7 +1663,6 @@ def map_spi_species(
         parent_path = report.object_paths.get(id(parent), "spi.injector.pellet.core")
         report.bind(species, f"{parent_path}.species")
         set_path(species, "name", label, report, ids_name, component.source)
-        set_path(species, "label", label, report, ids_name, component.source)
         set_path(species, "z_n", float(component.z), report, ids_name, component.source)
         if component.isotope is not None:
             set_path(species, "a", float(component.isotope), report, ids_name, component.source)
@@ -1984,7 +1996,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
         
         set_path(ts, "profiles_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
         set_path(ts, "profiles_1d/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
-        set_path(ts, "profiles_1d/phi_tor", phi_tor, report, ids_name, "derived from phi_tor")
+        set_path(ts, "profiles_1d/phi", phi_tor, report, ids_name, "derived from phi_tor")
         set_path(ts, "profiles_1d/r_outboard", R_outboard, report, ids_name, "derived from R0 and r")
 
         if Bmin is not None:
@@ -2038,10 +2050,10 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
             psi_norm = normalized_radius(psi_arr) if psi_arr is not None else None
 
             set_path(ts, "profiles_1d/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
-            set_path(ts, "profiles_1d/rho_pol_norm", psi_norm, report, ids_name, "derived")
+            set_path(ts, "profiles_1d/psi_norm", psi_norm, report, ids_name, "derived")
 
             set_path(ts, "global_quantities/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
-            set_path(ts, "profiles_1d/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
+            set_path(ts, "global_quantities/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
 
             dVdpsi, dpsi, psi_f = dVdpsi_from_dVdr(dVdr, dr, psi_arr)
 
@@ -2142,6 +2154,21 @@ def volume_integral_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt:
     return None
 
 
+def trace_time_axis(data: np.ndarray, full_time: np.ndarray) -> Optional[np.ndarray]:
+    """Return the time axis matching a DREAM time-dependent output array."""
+    arr = np.asarray(data)
+    time = np.asarray(full_time, dtype=float)
+    if arr.ndim == 0 or time.ndim != 1:
+        return None
+    if arr.shape[0] == time.size:
+        return time
+    if arr.shape[0] == time.size - 1:
+        return time[1:]
+    if arr.shape[0] < time.size:
+        return time[: arr.shape[0]]
+    return None
+
+
 def current_from_j_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: int) -> Optional[np.ndarray]:
     arr = radial_profile_trace(data, nt)
     weight_int_area = grids.get("weight_int_area")
@@ -2151,6 +2178,137 @@ def current_from_j_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: 
     if weights.ndim != 1 or weights.size != arr.shape[1]:
         return None
     return np.sum(arr * weights[None, :], axis=1)
+
+
+def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
+    ids_name = "radiation"
+    radiation = make_ids(factory, ids_name, report)
+    if radiation is None:
+        return None
+
+    emissivity_raw = dream.arr("/other/fluid/Tcold_radiation", report)
+    if emissivity_raw is None:
+        report.warn(
+            "radiation: /other/fluid/Tcold_radiation is absent, so no electron radiation process was filled."
+        )
+        return radiation
+
+    emissivity = np.asarray(emissivity_raw, dtype=float)
+    if emissivity.ndim != 2:
+        report.warn(
+            f"radiation: /other/fluid/Tcold_radiation has shape {emissivity.shape}, expected (time, radius)."
+        )
+        return radiation
+
+    time = trace_time_axis(emissivity, grids["time"])
+    if time is None:
+        report.warn(
+            "radiation: could not align /other/fluid/Tcold_radiation to /grid/t, "
+            "so no electron radiation process was filled."
+        )
+        return radiation
+
+    weights = volume_weights(grids)
+    if weights is None or weights.size != emissivity.shape[1]:
+        report.warn(
+            "radiation: volume integral of /other/fluid/Tcold_radiation could not be computed "
+            "because /grid/dr, /grid/VpVol, or /grid/R0 do not match the emissivity grid."
+        )
+        return radiation
+
+    total_power = np.sum(emissivity * weights[None, :], axis=1)
+    power_inside = np.cumsum(emissivity * weights[None, :], axis=1)
+
+    set_path(radiation, "time", time, report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+
+    if not resize_child_aos(radiation, "process", 1):
+        report.skip(ids_name, "process", "target AoS is not present in this DD version", "/other/fluid/Tcold_radiation")
+        return radiation
+
+    process = radiation.process[0]
+    report.bind(process, "radiation.process")
+    set_path(process, "identifier/index", -1, report, ids_name, "private process identifier for DREAM total electron radiation")
+    set_path(process, "identifier/name", "dream_total_electron_radiation", report, ids_name, "private process identifier for DREAM total electron radiation")
+    set_path(
+        process,
+        "identifier/description",
+        (
+            "Total cold-electron radiated power density from DREAM /other/fluid/Tcold_radiation. "
+            "DREAM output provides this as a combined radiation term, so line, recombination, "
+            "and bremsstrahlung components are not separated here."
+        ),
+        report,
+        ids_name,
+        "/other/fluid/Tcold_radiation",
+    )
+
+    if resize_child_aos(process, "global_quantities", time.size):
+        for it, t in enumerate(time):
+            gq = process.global_quantities[it]
+            report.bind(gq, "radiation.process.global_quantities")
+            set_path(gq, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+            set_path(
+                gq,
+                "inside_vessel/power_electrons",
+                float(total_power[it]),
+                report,
+                ids_name,
+                (
+                    "volume integral of /other/fluid/Tcold_radiation using "
+                    "dV = /grid/dr * /grid/VpVol * /grid/R0"
+                ),
+            )
+    else:
+        report.skip(ids_name, "process/global_quantities", "target AoS is not present in this DD version", "/other/fluid/Tcold_radiation")
+
+    if resize_child_aos(process, "profiles_1d", time.size):
+        rho_tor_norm = grids.get("rho_tor_norm")
+        rho_tor = grids.get("rho_tor")
+        for it, t in enumerate(time):
+            p1d = process.profiles_1d[it]
+            report.bind(p1d, "radiation.process.profiles_1d")
+            set_path(p1d, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+            if rho_tor_norm is not None:
+                set_path(
+                    p1d,
+                    "grid/rho_tor_norm",
+                    rho_tor_norm,
+                    report,
+                    ids_name,
+                    "rho_tor_norm = normalized sqrt(/grid/geometry/toroidalFlux/(pi*B0))",
+                )
+            if rho_tor is not None:
+                set_path(
+                    p1d,
+                    "grid/rho_tor",
+                    rho_tor,
+                    report,
+                    ids_name,
+                    "rho_tor = sqrt(/grid/geometry/toroidalFlux/(pi*B0))",
+                )
+            set_path(
+                p1d,
+                "electrons/emissivity",
+                emissivity[it],
+                report,
+                ids_name,
+                "/other/fluid/Tcold_radiation radiated power density [J s^-1 m^-3]",
+            )
+            set_path(
+                p1d,
+                "electrons/power_inside",
+                power_inside[it],
+                report,
+                ids_name,
+                (
+                    "cumulative volume integral of /other/fluid/Tcold_radiation using "
+                    "dV = /grid/dr * /grid/VpVol * /grid/R0"
+                ),
+            )
+    else:
+        report.skip(ids_name, "process/profiles_1d", "target AoS is not present in this DD version", "/other/fluid/Tcold_radiation")
+
+    return radiation
 
 
 def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
@@ -2163,7 +2321,6 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
     set_path(summary, "time", time, report, ids_name, "/grid/t")
 
     ip = scalar_time_trace(dream.arr("/eqsys/I_p"), nt)
-    psi_edge = scalar_time_trace(dream.arr("/eqsys/psi_edge"), nt)
     n_tot = dream.arr("/eqsys/n_tot")
     n_cold = dream.arr("/eqsys/n_cold")
     n_e_source = "/eqsys/n_tot"
@@ -2201,10 +2358,6 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
     if e_thermal is not None:
         set_path(summary, "global_quantities/energy_thermal/value", e_thermal, report, ids_name, "volume integral of /eqsys/W_cold plus /eqsys/W_i when available")
 
-    # Compatibility with older DD versions that carried psi here.
-    if psi_edge is not None:
-        set_path(summary, "global_quantities/psi_boundary/value", psi_edge, report, ids_name, "/eqsys/psi_edge")
-
     n_e_volume_average = volume_average_trace(n_tot, grids, nt)
     t_e_volume_average = volume_average_trace(t_cold, grids, nt)
     zeff_volume_average = volume_average_trace(zeff, grids, nt)
@@ -2218,8 +2371,6 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
     local_profiles = {
         "t_e": (t_cold, "/eqsys/T_cold"),
         "n_e": (n_tot, n_e_source),
-        "n_e_thermal": (n_cold, "/eqsys/n_cold"),
-        "n_e_runaway": (n_re, "/eqsys/n_re"),
         "zeff": (zeff, "/other/fluid/Zeff"),
         "e_field_parallel": (e_field, "/eqsys/E_field"),
     }
@@ -2276,6 +2427,8 @@ def build_ids(dream_file: str, dd_version: str | None, selected: Iterable[str]) 
             ids_list.append(map_spi(factory, dream, grids, report))
         if "equilibrium" in selected_set:
             ids_list.append(map_equilibrium(factory, dream, grids, report))
+        if "radiation" in selected_set:
+            ids_list.append(map_radiation(factory, dream, grids, report))
         if "summary" in selected_set:
             ids_list.append(map_summary(factory, dream, grids, report))
         return [ids for ids in ids_list if ids is not None], report
@@ -2299,8 +2452,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--ids",
         nargs="+",
-        default=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "summary"],
-        choices=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "summary"],
+        default=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "radiation", "summary"],
+        choices=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "radiation", "summary"],
         help="IDSs to create/write.",
     )
     parser.add_argument(
