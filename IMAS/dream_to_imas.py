@@ -2,52 +2,41 @@
 """
 dream_to_imas.py
 
-Map a DREAM HDF5 output file into selected IMAS IDSs with IMAS-Python.
+Map one DREAM HDF5 output file into selected IMAS IDSs with IMAS-Python.
 
-The converter focuses on DREAM data normally useful for disruption/runaway
-studies and writes, when available:
+Current mapping overview
+------------------------
+The detailed node-by-node mapping is written to the Markdown report generated
+next to the output. The main mapping entry points are:
 
-  * runaway_electrons IDS:
-      /eqsys/n_re, /eqsys/j_re, /other/fluid/runawayRate,
-      /other/fluid/gammaDreicer, /gammaAvalanche, /gammaTritium,
-      /gammaCompton, /pCrit, /pCritHottail, /EDreic, /Eceff, /Ecfree,
-      /Ectot, /other/fluid/W_re
+| IMAS IDS | Main DREAM sources | Mapping functions |
+| --- | --- | --- |
+| plasma_profiles | /eqsys/T_cold, /n_tot or /n_cold, /n_i, /j_tot, /j_ohm, /E_field, /other/fluid/Zeff, /conductivity | map_plasma_profiles(), fill_ion_profiles_1d(), fill_1d_grid() |
+| runaway_electrons | /eqsys/n_re, /j_re, /other/fluid/runawayRate, /gamma*, /pCrit*, /E* | map_runaway_electrons(), fill_1d_grid() |
+| spi | /settings/eqsys/spi/init/*, /settings/eqsys/n_i/SPIMolarFraction, /eqsys/x_p, /v_p, /Y_p | map_spi(), map_spi_species(), spi_injector_groups() |
+| equilibrium | /eqsys/I_p, /psi_p, /j_tot, /grid/R0, /grid/r, /grid/eq/*, /grid/geometry/* | map_equilibrium(), fill_equilibrium_profiles_2d(), boundary_outline() |
+| radiation | /other/fluid/Tcold_radiation, /grid/t, /grid/VpVol, /grid/dr, /grid/R0 | map_radiation() |
+| summary | volume/current reductions of plasma/runaway/equilibrium data, /code/* provenance | map_summary(), fill_code_metadata(), volume_integral_trace(), current_from_j_trace() |
 
-  * spi IDS:
-      /settings/eqsys/spi/init/xp, /vp, /rp, /Ninj,
-      /eqsys/x_p, /v_p, /Y_p
+How to add a new mapped field
+-----------------------------
+1. Find the relevant `map_<ids>()` function above.
+2. Read the DREAM dataset with `dream.arr("/path", report)` or `dream.scalar()`.
+3. Align time-dependent arrays with `time_aligned()` if needed.
+4. Fill the IMAS node with `fill_ids_field(root, "imas/node", value, report, ids_name, "DREAM source or derivation")`.
+5. Put the derivation in the last argument. This text is what appears in the
+   mapping report, so keep it precise enough for DREAM and IMAS experts to audit.
 
-  * plasma_profiles IDS:
-      /eqsys/T_cold, /eqsys/n_cold, /eqsys/n_tot, /eqsys/n_i,
-      /eqsys/j_tot, /eqsys/j_ohm, /eqsys/E_field,
-      /other/fluid/Zeff, /conductivity, /grid/r, /grid/t
+`fill_ids_field()` is intentionally defensive: if an IMAS node is absent in the
+installed Data Dictionary, or the assignment fails, the converter records a
+skipped mapping in the report instead of crashing.
 
-  * equilibrium IDS:
-      /eqsys/I_p, /eqsys/psi_p, /eqsys/psi_edge,
-      /eqsys/psi_wall, /grid/R0, /grid/r, /grid/eq/*
-
-  * summary IDS, when supported by the installed Data Dictionary:
-      /eqsys/I_p, /eqsys/V_loop_w, /eqsys/W_cold, /eqsys/W_i,
-      /eqsys/T_cold, /eqsys/n_tot, /eqsys/n_cold, /eqsys/n_re,
-      /eqsys/j_ohm, /eqsys/j_re, /eqsys/E_field, /other/fluid/Zeff,
-      /grid/R0, /grid/geometry/GR0, /grid/VpVol
-
-  * radiation IDS, when supported by the installed Data Dictionary:
-      /other/fluid/Tcold_radiation, /grid/r, /grid/t, /grid/VpVol
-
-Design choices
---------------
-DREAM and IMAS do not have a perfect one-to-one mapping. This script therefore:
-
-  1. Maps high-confidence physical quantities to documented IMAS fields.
-  2. Uses a defensive `set_path()` helper so the same script can run across
-     Data Dictionary versions. If a target node does not exist in your DD,
-     it is skipped and recorded in the report instead of crashing.
-  3. Writes an aggregated Markdown mapping report next to the output, including
-     successful, skipped, missing-source, and uncertain mappings.
-  4. Keeps values in DREAM units where these match IMAS nodes. DREAM T_cold is
-     eV, densities are m^-3, current densities are A m^-2, E_field is V m^-1,
-     time is seconds, and r/R0 are metres.
+Units policy
+------------
+Values are kept in DREAM units where these match IMAS nodes. DREAM T_cold is eV,
+densities are m^-3, current densities are A m^-2, E_field is V m^-1, time is
+seconds, and r/R0 are metres. Explicit conversions are noted in report sources
+for the affected fields.
 
 Requirements
 ------------
@@ -94,12 +83,12 @@ else:
     IMAS_IMPORT_ERROR = None
 
 # ------------------------ normalization factors---------------------------
-psi_cocos = 2.0*np.pi # good
-curr_dir  = 1.0       # 
-gamma_adb = 5.0/3.0
+psi_cocos = 2.0*np.pi
 c_light    = 299792458.0
 m_electron = 9.10938356e-31
 p_norm = m_electron * c_light
+
+DEFAULT_IDS = ["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "radiation", "summary"]
 
 
 # ----------------------------- reporting ---------------------------------
@@ -210,12 +199,12 @@ class MappingReport:
 
         lines.extend(markdown_table(
             "Set Mappings",
-            ["IMAS Node", "Units", "DREAM Source", "Count"],
+            ["IMAS Node", "Units", "DREAM Source / Derivation", "Count"],
             [(node, units, source, str(count)) for (node, units, source), count in sorted_report_items(self.set_nodes)],
         ))
         lines.extend(markdown_table(
             "Skipped Mappings",
-            ["IMAS Node", "Units", "DREAM Source", "Reason", "Count"],
+            ["IMAS Node", "Units", "DREAM Source / Derivation", "Reason", "Count"],
             [
                 (node, units, source, reason, str(count))
                 for (node, units, source, reason), count in sorted_report_items(self.skipped_nodes)
@@ -235,6 +224,13 @@ class MappingReport:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+@dataclass
+class ConversionResult:
+    source_file: str
+    ids_list: list[Any]
+    report: MappingReport
+
+
 def normalize_report_text(text: str) -> str:
     text = str(text)
     text = re.sub(r"\[:,\d+,:\]", "[:,*,:]", text)
@@ -242,13 +238,6 @@ def normalize_report_text(text: str) -> str:
     text = re.sub(r"\[\d+\]", "[*]", text)
     text = re.sub(r"/\d+(?=/|$)", "/*", text)
     return text
-
-
-def report_node_path(ids: str, target: str) -> str:
-    target = normalize_report_text(target)
-    if not target:
-        return ids
-    return normalize_node_path(f"{ids}.{target.replace('/', '.')}")
 
 
 def normalize_node_path(node_path: str) -> str:
@@ -264,6 +253,7 @@ IMAS_UNIT_FALLBACKS = [
     ("*.label", "n/a"),
     ("*.description", "n/a"),
     ("*.index", "1"),
+    ("*.code.*", "n/a"),
     ("*.time", "s"),
     ("*.global_quantities.ip", "A"),
     ("*.global_quantities.ip.value", "A"),
@@ -353,10 +343,6 @@ IMAS_UNIT_FALLBACKS = [
     ("*.z", "m"),
     ("*.volume", "m^3"),
 ]
-
-
-def imas_units_for_path(ids: str, target: str) -> str:
-    return imas_units_for_node(report_node_path(ids, target))
 
 
 def imas_units_for_node(node: str) -> str:
@@ -494,6 +480,49 @@ def flatten_1d(x: Optional[np.ndarray]) -> Optional[np.ndarray]:
     return np.asarray(a, dtype=float).reshape(-1)
 
 
+def as_text(value: Any) -> Optional[str]:
+    """Convert DREAM scalar/string datasets to a compact Python string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, bytes):
+        text = value.decode(errors="ignore")
+    else:
+        arr = np.asarray(value)
+        if arr.size == 0:
+            return None
+        if arr.dtype.kind in {"S", "U", "O"}:
+            text = "".join(str(item.decode(errors="ignore") if isinstance(item, bytes) else item) for item in arr.reshape(-1))
+        else:
+            text = str(arr.reshape(-1)[0])
+    text = text.strip().rstrip("\x00")
+    return text or None
+
+
+def dream_text(dream: DreamH5, path: str, report: MappingReport | None = None) -> Optional[str]:
+    return as_text(dream.arr(path, report))
+
+
+def xml_text(value: str) -> str:
+    """Escape a string for the small XML fragment stored in code/parameters."""
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def dream_code_parameters_xml(values: dict[str, str]) -> str:
+    lines = ["<dream_code_metadata>"]
+    for key, value in values.items():
+        lines.append(f"  <{key}>{xml_text(value)}</{key}>")
+    lines.append("</dream_code_metadata>")
+    return "\n".join(lines)
+
+
 def time_aligned(data: Optional[np.ndarray], nt: int) -> Optional[np.ndarray]:
     """Return data aligned to a time dimension, padding edge values if needed."""
     if data is None:
@@ -579,12 +608,37 @@ def resize_aos(aos: Any, n: int) -> bool:
         return False
 
 
-def set_path(root: Any, path: str, value: Any, report: MappingReport, ids_name: str, source: str) -> bool:
-    """Set a slash-separated IMAS path if it exists in this DD version.
+def fill_ids_field(root: Any, path: str, value: Any, report: MappingReport, ids_name: str, source: str) -> bool:
+    """Fill one IMAS IDS field and record the mapping in the report.
 
-    Example: set_path(pp, 'profiles_1d/0/electrons/temperature', value, ...)
+    Parameters
+    ----------
+    root:
+        IDS object, IDS structure, or AoS item that contains the target field.
+    path:
+        Slash-separated path relative to ``root``. Numeric components select AoS
+        items, for example ``profiles_1d/0/electrons/temperature``.
+    value:
+        Scalar or array to assign. NumPy scalar types are converted to native
+        Python scalars before assignment.
+    report:
+        Mapping report collecting successful and skipped assignments.
+    ids_name:
+        Name of the IDS being filled, such as ``"plasma_profiles"``.
+    source:
+        DREAM source path or derivation text. This is shown in the Markdown
+        report, so use precise formulas such as
+        ``"volume integral of /eqsys/j_re using current weights"``.
 
-    Array-of-structures elements are handled by numeric path components.
+    Returns
+    -------
+    bool
+        ``True`` when the assignment succeeds, ``False`` when the field is absent
+        in the installed Data Dictionary or assignment fails.
+
+    This helper is the preferred way to add mapped fields. It keeps the script
+    portable across IMAS Data Dictionary versions by recording skipped mappings
+    instead of raising on missing nodes.
     """
     parts = [p for p in path.split("/") if p]
     if not parts:
@@ -709,7 +763,7 @@ def fill_vacuum_toroidal_field(ids: Any, ids_name: str, grids: dict[str, Any], r
     R0 = grids.get("R0")
     B0 = grids.get("B0")
     if R0 is not None:
-        set_path(ids, "vacuum_toroidal_field/r0", R0, report, ids_name, "/grid/R0")
+        fill_ids_field(ids, "vacuum_toroidal_field/r0", R0, report, ids_name, "/grid/R0")
     else:
         report.warn(
             f"{ids_name}: vacuum_toroidal_field/r0 was not filled because no explicit R0 "
@@ -721,7 +775,7 @@ def fill_vacuum_toroidal_field(ids: Any, ids_name: str, grids: dict[str, Any], r
             b0 = np.full(np.asarray(time, dtype=float).shape, float(B0), dtype=float)
         else:
             b0 = float(B0)
-        set_path(ids, "vacuum_toroidal_field/b0", b0, report, ids_name, "/grid/B0")
+        fill_ids_field(ids, "vacuum_toroidal_field/b0", b0, report, ids_name, "/grid/B0")
     else:
         report.warn(
             f"{ids_name}: vacuum_toroidal_field/b0 was not filled because no explicit B0 "
@@ -733,8 +787,8 @@ def fill_1d_grid(p: Any, grids: dict[str, Any], dream: DreamH5, nt: int, it: int
     """Fill grid data for a single time step in profiles_1d."""
     rho_tor = grids["rho_tor"]
     rho_tor_norm = grids["rho_tor_norm"]
-    set_path(p, "grid/rho_tor", rho_tor, report, ids_name, "/grid/geometry/toroidalFlux")
-    set_path(p, "grid/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
+    fill_ids_field(p, "grid/rho_tor", rho_tor, report, ids_name, "/grid/geometry/toroidalFlux")
+    fill_ids_field(p, "grid/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
 
     psi_p = time_aligned(dream.arr("/eqsys/psi_p"), nt)*psi_cocos
     if psi_p is not None:
@@ -743,11 +797,11 @@ def fill_1d_grid(p: Any, grids: dict[str, Any], dream: DreamH5, nt: int, it: int
         psi_axis = float(psi_arr[0]) if psi_arr.size > 0 else 0.0
         psi_norm = normalized_radius(psi_arr) if psi_arr is not None else None
 
-        set_path(p, "grid/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
-        set_path(p, "grid/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
-        set_path(p, "grid/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
+        fill_ids_field(p, "grid/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
+        fill_ids_field(p, "grid/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
+        fill_ids_field(p, "grid/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
         
-        set_path(p, "grid/rho_pol_norm", psi_norm, report, ids_name, "derived")
+        fill_ids_field(p, "grid/rho_pol_norm", psi_norm, report, ids_name, "derived")
 
 
 def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
@@ -759,7 +813,7 @@ def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], rep
     time = grids["time"]
     nt = len(time)
 
-    set_path(pp, "time", time, report, ids_name, "/grid/t")
+    fill_ids_field(pp, "time", time, report, ids_name, "/grid/t")
     fill_vacuum_toroidal_field(pp, ids_name, grids, report)
 
     if not resize_child_aos(pp, "profiles_1d", nt):
@@ -771,7 +825,6 @@ def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], rep
         "electrons/temperature": ("/eqsys/T_cold", dream.arr("/eqsys/T_cold", report)),
         "electrons/density": ("/eqsys/n_tot", dream.arr("/eqsys/n_tot")),
         "electrons/density_thermal": ("/eqsys/n_cold", dream.arr("/eqsys/n_cold", report)),
-       # "pressure_ion_total": ("/eqsys/W_i", dream.arr("/eqsys/W_i", report)/(gamma_adb-1.0)), 
         "conductivity_parallel": ("/other/fluid/conductivity", dream.arr("/other/fluid/conductivity")),
         "e_field/parallel": ("/eqsys/E_field", dream.arr("/eqsys/E_field", report)),
         "zeff": ("/other/fluid/Zeff", dream.arr("/other/fluid/Zeff")),
@@ -787,23 +840,23 @@ def map_plasma_profiles(factory: Any, dream: DreamH5, grids: dict[str, Any], rep
     for it in range(nt):
         p = pp.profiles_1d[it]
         report.bind(p, "plasma_profiles.profiles_1d")
-        set_path(p, "time", time[it], report, ids_name, "/grid/t")
+        fill_ids_field(p, "time", time[it], report, ids_name, "/grid/t")
 
         fill_1d_grid(p, grids, dream, nt, it, report, ids_name)
 
         for target, (source, data) in profiles.items():
             aligned = time_aligned(data, nt)
             if aligned is not None:
-                set_path(p, target, aligned[it], report, ids_name, source)
+                fill_ids_field(p, target, aligned[it], report, ids_name, source)
             elif source:
                 report.missing(source)
 
         if j_tot is not None:
             jt = time_aligned(j_tot, nt)[it]
-            set_path(p, "j_total", jt, report, ids_name, "/eqsys/j_tot")
+            fill_ids_field(p, "j_total", jt, report, ids_name, "/eqsys/j_tot")
         if j_ohm is not None:
             jo = time_aligned(j_ohm, nt)[it]
-            set_path(p, "j_ohmic", jo, report, ids_name, "/eqsys/j_ohm")
+            fill_ids_field(p, "j_ohmic", jo, report, ids_name, "/eqsys/j_ohm")
 
         # Ion densities: DREAM /eqsys/n_i has shape (time, charge_state_flat, r).
         fill_ion_profiles_1d(p, dream, it, nt, report, ids_name)
@@ -1085,10 +1138,10 @@ def set_element_atomic_properties(
         report.bind(element, f"{parent_path}.element")
 
     # IMAS commonly uses z_n for nuclear charge and a for mass number.
-    set_path(element, "z_n", float(z), report, ids_name, source)
+    fill_ids_field(element, "z_n", float(z), report, ids_name, source)
 
     if A is not None:
-        set_path(element, "a", float(A), report, ids_name, source)
+        fill_ids_field(element, "a", float(A), report, ids_name, source)
 
 
 def fill_ion_profiles_1d(
@@ -1233,8 +1286,8 @@ def fill_ion_profiles_1d(
         if has_ion and has_neutral:
             report.bind(p.ion[iion], "plasma_profiles.profiles_1d.ion")
             report.bind(p.neutral[iion], "plasma_profiles.profiles_1d.neutral")
-            set_path(p.ion[iion], "neutral_index", iion, report, ids_name, "DREAM species index")
-            set_path(p.neutral[iion], "ion_index", iion, report, ids_name, "DREAM species index") 
+            fill_ids_field(p.ion[iion], "neutral_index", iion, report, ids_name, "DREAM species index")
+            fill_ids_field(p.neutral[iion], "ion_index", iion, report, ids_name, "DREAM species index")
 
         # ------------------------------------------------------------
         # DREAM Z0=0: neutral density
@@ -1256,12 +1309,12 @@ def fill_ion_profiles_1d(
             )
 
             # Depending on DD version, neutral density may be direct or under state.
-            set_path(neutral, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
+            fill_ids_field(neutral, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
 
             if hasattr(neutral, "state") and resize_aos(neutral.state, 1):
                 nstate = neutral.state[0]
                 report.bind(nstate, "plasma_profiles.profiles_1d.neutral.state")
-                set_path(nstate, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
+                fill_ids_field(nstate, "density", neutral_density, report, ids_name, "/eqsys/n_i Z0=0")
 
         # ------------------------------------------------------------
         # DREAM Z0=1..Z: charged ion densities
@@ -1272,7 +1325,7 @@ def fill_ion_profiles_1d(
             ion = p.ion[iion]
             report.bind(ion, "plasma_profiles.profiles_1d.ion")
 
-            set_path(ion, "name", label, report, ids_name, "/settings/eqsys/n_i/names")
+            fill_ids_field(ion, "name", label, report, ids_name, "/settings/eqsys/n_i/names")
             set_element_atomic_properties(
                 ion,
                 label=label,
@@ -1285,7 +1338,7 @@ def fill_ion_profiles_1d(
 
             # ion.density should exclude neutrals.
             if charged_block.size:
-                set_path(
+                fill_ids_field(
                     ion,
                     "density",
                     np.sum(charged_block, axis=0),
@@ -1303,7 +1356,7 @@ def fill_ion_profiles_1d(
 
                     # Do NOT set z_min/z_max here, per your request.
                     # The charge state is encoded by ordering and label.
-                    set_path(
+                    fill_ids_field(
                         state,
                         "name",
                         f"{label} Z0={z0}",
@@ -1311,7 +1364,7 @@ def fill_ion_profiles_1d(
                         ids_name,
                         "/eqsys/n_i charge-state index",
                     )
-                    set_path(
+                    fill_ids_field(
                         state,
                         "density",
                         block[z0, :],
@@ -1329,7 +1382,7 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
     time = grids["time"]
     nt   = len(time)
 
-    set_path(re_ids, "time", time, report, ids_name, "/grid/t")
+    fill_ids_field(re_ids, "time", time, report, ids_name, "/grid/t")
     fill_vacuum_toroidal_field(re_ids, ids_name, grids, report)
 
     if not resize_child_aos(re_ids, "profiles_1d", nt):
@@ -1356,14 +1409,14 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
     for it in range(nt):
         p = re_ids.profiles_1d[it]
         report.bind(p, "runaway_electrons.profiles_1d")
-        set_path(p, "time", time[it], report, ids_name, "/grid/t")
+        fill_ids_field(p, "time", time[it], report, ids_name, "/grid/t")
 
         fill_1d_grid(p, grids, dream, nt, it, report, ids_name)
 
         for target, (source, data) in quantities.items():
             aligned = time_aligned(data, nt)
             if aligned is not None:
-                set_path(p, target, aligned[it], report, ids_name, source)
+                fill_ids_field(p, target, aligned[it], report, ids_name, source)
             elif source:
                 report.missing(source)
 
@@ -1371,7 +1424,7 @@ def map_runaway_electrons(factory: Any, dream: DreamH5, grids: dict[str, Any], r
     j_re = dream.arr("/eqsys/j_re")
     I_re = current_from_j_trace(j_re, grids, nt)
 
-    set_path(re_ids, "global_quantities/current_phi", I_re, report, ids_name, "derived from j_re")
+    fill_ids_field(re_ids, "global_quantities/current_phi", I_re, report, ids_name, "derived from j_re")
 
     return re_ids
 
@@ -1639,7 +1692,7 @@ def map_spi_species(
     atoms_values = [atoms for _, _, _, atoms in active if atoms is not None]
     total_atoms = float(np.sum(atoms_values)) if atoms_values and np.sum(atoms_values) > 0.0 else None
     if total_atoms is not None:
-        set_path(parent, "atoms_n", total_atoms, report, ids_name, "/settings/eqsys/spi/init/Ninj")
+        fill_ids_field(parent, "atoms_n", total_atoms, report, ids_name, "/settings/eqsys/spi/init/Ninj")
 
     total_volume = None
     if initial_volume is not None and group.shard_indices.size > 0:
@@ -1662,10 +1715,10 @@ def map_spi_species(
         species = parent.species[ispecies]
         parent_path = report.object_paths.get(id(parent), "spi.injector.pellet.core")
         report.bind(species, f"{parent_path}.species")
-        set_path(species, "name", label, report, ids_name, component.source)
-        set_path(species, "z_n", float(component.z), report, ids_name, component.source)
+        fill_ids_field(species, "name", label, report, ids_name, component.source)
+        fill_ids_field(species, "z_n", float(component.z), report, ids_name, component.source)
         if component.isotope is not None:
-            set_path(species, "a", float(component.isotope), report, ids_name, component.source)
+            fill_ids_field(species, "a", float(component.isotope), report, ids_name, component.source)
 
         mixture_fraction = None
         if group.fractions is not None and fraction_sum is not None and fraction_sum > 0.0:
@@ -1675,7 +1728,7 @@ def map_spi_species(
 
         if mixture_fraction is not None and total_atoms is not None and total_volume is not None:
             density = float(total_atoms / total_volume * mixture_fraction)
-            set_path(species, "density", density, report, ids_name, f"{group.source}, /eqsys/Y_p or /settings/eqsys/spi/init/rp")
+            fill_ids_field(species, "density", density, report, ids_name, f"{group.source}, /eqsys/Y_p or /settings/eqsys/spi/init/rp")
         elif mixture_fraction is not None:
             report.skip(
                 ids_name,
@@ -1694,7 +1747,7 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
     time = grids["time"]
     nt = len(time)
     R0 = float(grids.get("R0") or 0.0)
-    set_path(spi, "time", time, report, ids_name, "/grid/t")
+    fill_ids_field(spi, "time", time, report, ids_name, "/grid/t")
 
     x_p = reshape_spi_vector(dream.arr("/eqsys/x_p", report), nt)
     v_p = reshape_spi_vector(dream.arr("/eqsys/v_p", report), nt)
@@ -1742,8 +1795,8 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
         injector = spi.injector[igroup]
         report.bind(injector, "spi.injector")
         name = "DREAM_SPI" if len(groups) == 1 else f"DREAM_SPI_{igroup + 1}"
-        set_path(injector, "name", name, report, ids_name, "DREAM SPI")
-        set_path(
+        fill_ids_field(injector, "name", name, report, ids_name, "DREAM SPI")
+        fill_ids_field(
             injector,
             "description",
             "Shattered pellet injection reconstructed from DREAM shard state",
@@ -1771,8 +1824,8 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
         # this should be set only for the very first DREAM file of the simulation
         if v_p is not None and v_p.shape[1] > int(np.max(group_shards)):
             vr0, vz0 = dream_spi_velocity_to_imas_rz(v_p[0, group_shards, :])
-            set_path(injector, "velocity_mass_centre_fragments_r", float(np.mean(vr0)), report, ids_name, "/eqsys/v_p[0]")
-            set_path(injector, "velocity_mass_centre_fragments_z", float(np.mean(vz0)), report, ids_name, "/eqsys/v_p[0]")
+            fill_ids_field(injector, "velocity_mass_centre_fragments_r", float(np.mean(vr0)), report, ids_name, "/eqsys/v_p[0]")
+            fill_ids_field(injector, "velocity_mass_centre_fragments_z", float(np.mean(vz0)), report, ids_name, "/eqsys/v_p[0]")
 
         if not resize_child_aos(injector, "fragment", group_shards.size):
             report.skip(ids_name, f"injector/{igroup}/fragment", "could not resize AoS", "/eqsys/x_p,/eqsys/Y_p")
@@ -1784,14 +1837,14 @@ def map_spi(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Mapping
             report.bind(fragment, "spi.injector.fragment")
             if x_p is not None and ish < x_p.shape[1]:
                 r, z = dream_spi_position_to_imas_rz(x_p[:, ish, :], R0)
-                set_path(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
-                set_path(fragment, "position/z", z, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+                fill_ids_field(fragment, "position/r", r, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
+                fill_ids_field(fragment, "position/z", z, report, ids_name, f"/eqsys/x_p[:,{ish},:]")
             if v_p is not None and ish < v_p.shape[1]:
                 vr, vz = dream_spi_velocity_to_imas_rz(v_p[:, ish, :])
-                set_path(fragment, "velocity_r", vr, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
-                set_path(fragment, "velocity_z", vz, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+                fill_ids_field(fragment, "velocity_r", vr, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
+                fill_ids_field(fragment, "velocity_z", vz, report, ids_name, f"/eqsys/v_p[:,{ish},:]")
             if volume is not None and ish < volume.shape[1]:
-                set_path(fragment, "volume", volume[:, ish], report, ids_name, f"/eqsys/Y_p[:,{ish}]")
+                fill_ids_field(fragment, "volume", volume[:, ish], report, ids_name, f"/eqsys/Y_p[:,{ish}]")
 
     return spi
 
@@ -1908,12 +1961,12 @@ def fill_equilibrium_profiles_2d(
     p2d = ts.profiles_2d[0]
     ts_path = report.object_paths.get(id(ts), "equilibrium.time_slice")
     report.bind(p2d, f"{ts_path}.profiles_2d")
-    set_path(p2d, "type/name", "total", report, ids_name, "equilibrium_profiles_2d_identifier")
-    set_path(p2d, "type/index", 0, report, ids_name, "equilibrium_profiles_2d_identifier")
-    set_path(p2d, "type/description", "Total fields", report, ids_name, "equilibrium_profiles_2d_identifier")
-    set_path(p2d, "grid_type/name", "inverse_psi_polar", report, ids_name, "poloidal_plane_coordinates_identifier")
-    set_path(p2d, "grid_type/index", 13, report, ids_name, "poloidal_plane_coordinates_identifier")
-    set_path(
+    fill_ids_field(p2d, "type/name", "total", report, ids_name, "equilibrium_profiles_2d_identifier")
+    fill_ids_field(p2d, "type/index", 0, report, ids_name, "equilibrium_profiles_2d_identifier")
+    fill_ids_field(p2d, "type/description", "Total fields", report, ids_name, "equilibrium_profiles_2d_identifier")
+    fill_ids_field(p2d, "grid_type/name", "inverse_psi_polar", report, ids_name, "poloidal_plane_coordinates_identifier")
+    fill_ids_field(p2d, "grid_type/index", 13, report, ids_name, "poloidal_plane_coordinates_identifier")
+    fill_ids_field(
         p2d,
         "grid_type/description",
         "Flux-surface grid with psi as radial label and DREAM poloidal angle as dim2",
@@ -1921,11 +1974,11 @@ def fill_equilibrium_profiles_2d(
         ids_name,
         "poloidal_plane_coordinates_identifier",
     )
-    set_path(p2d, "grid/dim1", psi_grid, report, ids_name, "/eqsys/psi_p")
-    set_path(p2d, "grid/dim2", theta, report, ids_name, "/grid/eq/theta")
-    set_path(p2d, "r", r_2d, report, ids_name, source)
-    set_path(p2d, "z", z_2d, report, ids_name, source)
-    set_path(p2d, "psi", np.repeat(psi_grid[:, np.newaxis], theta.size, axis=1), report, ids_name, source)
+    fill_ids_field(p2d, "grid/dim1", psi_grid, report, ids_name, "/eqsys/psi_p")
+    fill_ids_field(p2d, "grid/dim2", theta, report, ids_name, "/grid/eq/theta")
+    fill_ids_field(p2d, "r", r_2d, report, ids_name, source)
+    fill_ids_field(p2d, "z", z_2d, report, ids_name, source)
+    fill_ids_field(p2d, "psi", np.repeat(psi_grid[:, np.newaxis], theta.size, axis=1), report, ids_name, source)
 
 
 def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
@@ -1940,7 +1993,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
     R0 = grids.get("R0") or 0.0
     Z0 = dream.scalar("/grid/eq/Z0", 0.0) or 0.0
 
-    set_path(eq, "time", time, report, ids_name, "/grid/t")
+    fill_ids_field(eq, "time", time, report, ids_name, "/grid/t")
     fill_vacuum_toroidal_field(eq, ids_name, grids, report)
 
     if not resize_child_aos(eq, "time_slice", nt):
@@ -1990,21 +2043,21 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
     for it in range(nt):
         ts = eq.time_slice[it]
         report.bind(ts, "equilibrium.time_slice")
-        set_path(ts, "time", time[it], report, ids_name, "/grid/t")
+        fill_ids_field(ts, "time", time[it], report, ids_name, "/grid/t")
         if ip is not None and it < len(ip):
-            set_path(ts, "global_quantities/ip", float(ip[it]), report, ids_name, "/eqsys/I_p")
+            fill_ids_field(ts, "global_quantities/ip", float(ip[it]), report, ids_name, "/eqsys/I_p")
         
-        set_path(ts, "profiles_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
-        set_path(ts, "profiles_1d/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
-        set_path(ts, "profiles_1d/phi", phi_tor, report, ids_name, "derived from phi_tor")
-        set_path(ts, "profiles_1d/r_outboard", R_outboard, report, ids_name, "derived from R0 and r")
+        fill_ids_field(ts, "profiles_1d/rho_tor", rho_tor, report, ids_name, "derived from rho_tor /grid/geometry/toroidalFlux")
+        fill_ids_field(ts, "profiles_1d/rho_tor_norm", rho_tor_norm, report, ids_name, "derived from rho_tor")
+        fill_ids_field(ts, "profiles_1d/phi", phi_tor, report, ids_name, "derived from phi_tor")
+        fill_ids_field(ts, "profiles_1d/r_outboard", R_outboard, report, ids_name, "derived from R0 and r")
 
         if Bmin is not None:
-            set_path(ts, "profiles_1d/b_field_min", Bmin, report, ids_name, "/grid/geometry/Bmin")
+            fill_ids_field(ts, "profiles_1d/b_field_min", Bmin, report, ids_name, "/grid/geometry/Bmin")
         if Bmax is not None:
-            set_path(ts, "profiles_1d/b_field_max", Bmax, report, ids_name, "/grid/geometry/Bmax")
+            fill_ids_field(ts, "profiles_1d/b_field_max", Bmax, report, ids_name, "/grid/geometry/Bmax")
         if b_field_average is not None:
-            set_path(
+            fill_ids_field(
                 ts,
                 "profiles_1d/b_field_average",
                 b_field_average,
@@ -2013,7 +2066,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
                 "derived from /grid/geometry/Bmin and /grid/geometry/FSA_BOverBmin",
             )
         if trapped_fraction is not None:
-            set_path(
+            fill_ids_field(
                 ts,
                 "profiles_1d/trapped_fraction",
                 trapped_fraction,
@@ -2022,7 +2075,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
                 trapped_fraction_source,
             )
         if gm1 is not None:
-            set_path(
+            fill_ids_field(
                 ts,
                 "profiles_1d/gm1",
                 gm1,
@@ -2031,7 +2084,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
                 "derived from /grid/geometry/FSA_R02OverR2 and /grid/R0",
             )
         if gm5 is not None:
-            set_path(
+            fill_ids_field(
                 ts,
                 "profiles_1d/gm5",
                 gm5,
@@ -2041,7 +2094,7 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
             )
 
         if j_tot is not None:
-            set_path(ts, "profiles_1d/j_phi", j_tot[it], report, ids_name, "/eqsys/j_tot")
+            fill_ids_field(ts, "profiles_1d/j_phi", j_tot[it], report, ids_name, "/eqsys/j_tot")
 
         if psi_p is not None:
             psi_arr  = np.asarray(psi_p[it], dtype=float)
@@ -2049,22 +2102,22 @@ def map_equilibrium(factory: Any, dream: DreamH5, grids: dict[str, Any], report:
             psi_axis = float(psi_arr[0]) if psi_arr.size > 0 else 0.0
             psi_norm = normalized_radius(psi_arr) if psi_arr is not None else None
 
-            set_path(ts, "profiles_1d/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
-            set_path(ts, "profiles_1d/psi_norm", psi_norm, report, ids_name, "derived")
+            fill_ids_field(ts, "profiles_1d/psi", psi_arr, report, ids_name, "/eqsys/psi_p")
+            fill_ids_field(ts, "profiles_1d/psi_norm", psi_norm, report, ids_name, "derived")
 
-            set_path(ts, "global_quantities/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
-            set_path(ts, "global_quantities/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
+            fill_ids_field(ts, "global_quantities/psi_boundary", psi_bnd, report, ids_name, "/eqsys/psi_p[:,-1]")
+            fill_ids_field(ts, "global_quantities/psi_magnetic_axis", psi_axis, report, ids_name, "/eqsys/psi_p[:,0]")
 
             dVdpsi, dpsi, psi_f = dVdpsi_from_dVdr(dVdr, dr, psi_arr)
 
-            set_path(ts, "profiles_1d/dvolume_dpsi", dVdpsi, report, ids_name, "derived")
+            fill_ids_field(ts, "profiles_1d/dvolume_dpsi", dVdpsi, report, ids_name, "derived")
             fill_equilibrium_profiles_2d(ts, dream, R0, Z0, psi_arr, report, ids_name)
 
         if r_boundary is not None and z_boundary is not None:
-            set_path(ts, "boundary/outline/r", r_boundary, report, ids_name, "/grid/eq/RMinusR0_f[:,-1] + R0")
-            set_path(ts, "boundary/outline/z", z_boundary, report, ids_name, "/grid/eq/ZMinusZ0_f[:,-1] + Z0")
-            set_path(ts, "boundary/geometric_axis/r", float(np.mean([np.min(r_boundary), np.max(r_boundary)])), report, ids_name, "/grid/eq/RMinusR0_f")
-            set_path(ts, "boundary/geometric_axis/z", float(np.mean([np.min(z_boundary), np.max(z_boundary)])), report, ids_name, "/grid/eq/ZMinusZ0_f")
+            fill_ids_field(ts, "boundary/outline/r", r_boundary, report, ids_name, "/grid/eq/RMinusR0_f[:,-1] + R0")
+            fill_ids_field(ts, "boundary/outline/z", z_boundary, report, ids_name, "/grid/eq/ZMinusZ0_f[:,-1] + Z0")
+            fill_ids_field(ts, "boundary/geometric_axis/r", float(np.mean([np.min(r_boundary), np.max(r_boundary)])), report, ids_name, "/grid/eq/RMinusR0_f")
+            fill_ids_field(ts, "boundary/geometric_axis/z", float(np.mean([np.min(z_boundary), np.max(z_boundary)])), report, ids_name, "/grid/eq/ZMinusZ0_f")
 
     return eq
 
@@ -2180,6 +2233,53 @@ def current_from_j_trace(data: Optional[np.ndarray], grids: dict[str, Any], nt: 
     return np.sum(arr * weights[None, :], axis=1)
 
 
+def fill_code_metadata(ids: Any, dream: DreamH5, report: MappingReport, ids_name: str) -> None:
+    """Fill IMAS util/code metadata from DREAM /code provenance datasets."""
+    code_values = {
+        "commit": dream_text(dream, "/code/commit", report),
+        "changes": dream_text(dream, "/code/changes", report),
+        "datetime_commit": dream_text(dream, "/code/datetime_commit", report),
+        "datetime_simulation": dream_text(dream, "/code/datetime_simulation", report),
+        "refspec": dream_text(dream, "/code/refspec", report),
+    }
+    if not any(code_values.values()):
+        return
+
+    fill_ids_field(ids, "code/name", "DREAM", report, ids_name, "DREAM code name")
+    fill_ids_field(
+        ids,
+        "code/description",
+        "Disruption Runaway Electron Analysis Model simulation",
+        report,
+        ids_name,
+        "DREAM code description",
+    )
+    fill_ids_field(
+        ids,
+        "code/repository",
+        "https://github.com/chalmersplasmatheory/DREAM",
+        report,
+        ids_name,
+        "DREAM public repository",
+    )
+
+    if code_values["commit"] is not None:
+        fill_ids_field(ids, "code/commit", code_values["commit"], report, ids_name, "/code/commit")
+    if code_values["refspec"] is not None:
+        fill_ids_field(ids, "code/version", code_values["refspec"], report, ids_name, "/code/refspec")
+
+    parameters = {key: value for key, value in code_values.items() if value is not None}
+    if parameters:
+        fill_ids_field(
+            ids,
+            "code/parameters",
+            dream_code_parameters_xml(parameters),
+            report,
+            ids_name,
+            "/code/changes, /code/commit, /code/datetime_commit, /code/datetime_simulation, /code/refspec",
+        )
+
+
 def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: MappingReport):
     ids_name = "radiation"
     radiation = make_ids(factory, ids_name, report)
@@ -2219,7 +2319,7 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
     total_power = np.sum(emissivity * weights[None, :], axis=1)
     power_inside = np.cumsum(emissivity * weights[None, :], axis=1)
 
-    set_path(radiation, "time", time, report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+    fill_ids_field(radiation, "time", time, report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
 
     if not resize_child_aos(radiation, "process", 1):
         report.skip(ids_name, "process", "target AoS is not present in this DD version", "/other/fluid/Tcold_radiation")
@@ -2227,9 +2327,9 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
 
     process = radiation.process[0]
     report.bind(process, "radiation.process")
-    set_path(process, "identifier/index", -1, report, ids_name, "private process identifier for DREAM total electron radiation")
-    set_path(process, "identifier/name", "dream_total_electron_radiation", report, ids_name, "private process identifier for DREAM total electron radiation")
-    set_path(
+    fill_ids_field(process, "identifier/index", -1, report, ids_name, "private process identifier for DREAM total electron radiation")
+    fill_ids_field(process, "identifier/name", "dream_total_electron_radiation", report, ids_name, "private process identifier for DREAM total electron radiation")
+    fill_ids_field(
         process,
         "identifier/description",
         (
@@ -2246,8 +2346,8 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
         for it, t in enumerate(time):
             gq = process.global_quantities[it]
             report.bind(gq, "radiation.process.global_quantities")
-            set_path(gq, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
-            set_path(
+            fill_ids_field(gq, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+            fill_ids_field(
                 gq,
                 "inside_vessel/power_electrons",
                 float(total_power[it]),
@@ -2267,9 +2367,9 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
         for it, t in enumerate(time):
             p1d = process.profiles_1d[it]
             report.bind(p1d, "radiation.process.profiles_1d")
-            set_path(p1d, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
+            fill_ids_field(p1d, "time", float(t), report, ids_name, "/grid/t aligned to /other/fluid/Tcold_radiation")
             if rho_tor_norm is not None:
-                set_path(
+                fill_ids_field(
                     p1d,
                     "grid/rho_tor_norm",
                     rho_tor_norm,
@@ -2278,7 +2378,7 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
                     "rho_tor_norm = normalized sqrt(/grid/geometry/toroidalFlux/(pi*B0))",
                 )
             if rho_tor is not None:
-                set_path(
+                fill_ids_field(
                     p1d,
                     "grid/rho_tor",
                     rho_tor,
@@ -2286,7 +2386,7 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
                     ids_name,
                     "rho_tor = sqrt(/grid/geometry/toroidalFlux/(pi*B0))",
                 )
-            set_path(
+            fill_ids_field(
                 p1d,
                 "electrons/emissivity",
                 emissivity[it],
@@ -2294,7 +2394,7 @@ def map_radiation(factory: Any, dream: DreamH5, grids: dict[str, Any], report: M
                 ids_name,
                 "/other/fluid/Tcold_radiation radiated power density [J s^-1 m^-3]",
             )
-            set_path(
+            fill_ids_field(
                 p1d,
                 "electrons/power_inside",
                 power_inside[it],
@@ -2318,7 +2418,8 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
         return None
     time = grids["time"]
     nt = len(time)
-    set_path(summary, "time", time, report, ids_name, "/grid/t")
+    fill_ids_field(summary, "time", time, report, ids_name, "/grid/t")
+    fill_code_metadata(summary, dream, report, ids_name)
 
     ip = scalar_time_trace(dream.arr("/eqsys/I_p"), nt)
     n_tot = dream.arr("/eqsys/n_tot")
@@ -2337,13 +2438,13 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
     w_i = dream.arr("/eqsys/W_i")
 
     if ip is not None:
-        set_path(summary, "global_quantities/ip/value", ip, report, ids_name, "/eqsys/I_p")
-   
+        fill_ids_field(summary, "global_quantities/ip/value", ip, report, ids_name, "/eqsys/I_p")
+
     i_ohm = current_from_j_trace(j_ohm, grids, nt)
     i_re = current_from_j_trace(j_re, grids, nt)
     if i_ohm is not None:
-        set_path(summary, "global_quantities/current_ohm/value", i_ohm, report, ids_name, "derived from /eqsys/j_ohm")
-  
+        fill_ids_field(summary, "global_quantities/current_ohm/value", i_ohm, report, ids_name, "derived from /eqsys/j_ohm")
+
     e_cold = volume_integral_trace(w_cold, grids, nt)
     e_ion = volume_integral_trace(w_i, grids, nt)
     e_thermal = None
@@ -2352,21 +2453,21 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
     elif e_cold is not None:
         e_thermal = e_cold
     if e_cold is not None:
-        set_path(summary, "global_quantities/energy_electrons_thermal/value", e_cold, report, ids_name, "volume integral of /eqsys/W_cold")
+        fill_ids_field(summary, "global_quantities/energy_electrons_thermal/value", e_cold, report, ids_name, "volume integral of /eqsys/W_cold")
     if e_ion is not None:
-        set_path(summary, "global_quantities/energy_ion_total_thermal/value", e_ion, report, ids_name, "volume integral of /eqsys/W_i")
+        fill_ids_field(summary, "global_quantities/energy_ion_total_thermal/value", e_ion, report, ids_name, "volume integral of /eqsys/W_i")
     if e_thermal is not None:
-        set_path(summary, "global_quantities/energy_thermal/value", e_thermal, report, ids_name, "volume integral of /eqsys/W_cold plus /eqsys/W_i when available")
+        fill_ids_field(summary, "global_quantities/energy_thermal/value", e_thermal, report, ids_name, "volume integral of /eqsys/W_cold plus /eqsys/W_i when available")
 
     n_e_volume_average = volume_average_trace(n_tot, grids, nt)
     t_e_volume_average = volume_average_trace(t_cold, grids, nt)
     zeff_volume_average = volume_average_trace(zeff, grids, nt)
     if t_e_volume_average is not None:
-        set_path(summary, "volume_average/t_e/value", t_e_volume_average, report, ids_name, "volume average of /eqsys/T_cold")
+        fill_ids_field(summary, "volume_average/t_e/value", t_e_volume_average, report, ids_name, "volume average of /eqsys/T_cold")
     if n_e_volume_average is not None:
-        set_path(summary, "volume_average/n_e/value", n_e_volume_average, report, ids_name, f"volume average of {n_e_source}")
+        fill_ids_field(summary, "volume_average/n_e/value", n_e_volume_average, report, ids_name, f"volume average of {n_e_source}")
     if zeff_volume_average is not None:
-        set_path(summary, "volume_average/zeff/value", zeff_volume_average, report, ids_name, "volume average of /other/fluid/Zeff")
+        fill_ids_field(summary, "volume_average/zeff/value", zeff_volume_average, report, ids_name, "volume average of /other/fluid/Zeff")
 
     local_profiles = {
         "t_e": (t_cold, "/eqsys/T_cold"),
@@ -2378,18 +2479,18 @@ def map_summary(factory: Any, dream: DreamH5, grids: dict[str, Any], report: Map
         axis_value = radial_sample_trace(data, nt, 0)
         separatrix_value = radial_sample_trace(data, nt, -1)
         if axis_value is not None:
-            set_path(summary, f"local/magnetic_axis/{target}/value", axis_value, report, ids_name, f"{source}[:,0]")
+            fill_ids_field(summary, f"local/magnetic_axis/{target}/value", axis_value, report, ids_name, f"{source}[:,0]")
         if separatrix_value is not None:
-            set_path(summary, f"local/separatrix/{target}/value", separatrix_value, report, ids_name, f"{source}[:,-1]")
+            fill_ids_field(summary, f"local/separatrix/{target}/value", separatrix_value, report, ids_name, f"{source}[:,-1]")
 
 
     if i_re is not None:
-        set_path(summary, "runaways/current/value", i_re, report, ids_name, "derived from /eqsys/j_re")
+        fill_ids_field(summary, "runaways/current/value", i_re, report, ids_name, "derived from /eqsys/j_re")
     if i_re is not None and i_re.size > 0:
-        set_path(summary, "runaways/current_phi_max/value", float(np.nanmax(np.abs(i_re))), report, ids_name, "maximum absolute derived runaway current")
+        fill_ids_field(summary, "runaways/current_phi_max/value", float(np.nanmax(np.abs(i_re))), report, ids_name, "maximum absolute derived runaway current")
     runaway_particles = volume_integral_trace(n_re, grids, nt)
     if runaway_particles is not None:
-        set_path(summary, "runaways/particles/value", runaway_particles, report, ids_name, "volume integral of /eqsys/n_re")
+        fill_ids_field(summary, "runaways/particles/value", runaway_particles, report, ids_name, "volume integral of /eqsys/n_re")
 
     return summary
 
@@ -2436,6 +2537,17 @@ def build_ids(dream_file: str, dd_version: str | None, selected: Iterable[str]) 
         dream.close()
 
 
+def convert_dream_h5(
+    dream_file: str | Path,
+    dd_version: str | None = None,
+    ids: Iterable[str] | None = None,
+) -> ConversionResult:
+    """Convert one DREAM HDF5 file into IMAS IDS objects and a mapping report."""
+    selected = DEFAULT_IDS if ids is None else list(ids)
+    ids_list, report = build_ids(str(dream_file), dd_version, selected)
+    return ConversionResult(source_file=str(dream_file), ids_list=ids_list, report=report)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert selected DREAM HDF5 output quantities to IMAS IDSs."
@@ -2452,8 +2564,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--ids",
         nargs="+",
-        default=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "radiation", "summary"],
-        choices=["plasma_profiles", "runaway_electrons", "spi", "equilibrium", "radiation", "summary"],
+        default=DEFAULT_IDS,
+        choices=DEFAULT_IDS,
         help="IDSs to create/write.",
     )
     parser.add_argument(
