@@ -71,8 +71,8 @@ program get_data_files
       tri_z = (nodes_xyz(3,i1) + nodes_xyz(3,i2) + nodes_xyz(3,i3) ) / 3.d0
       tri_R = sqrt(tri_x**2 +tri_y**2)
 
-      tri_phi   = atan2(-tri_y,tri_x)
-      if (tri_phi < 0.d0) tri_phi = tri_phi + 2.d0 * 3.14159265d0
+      tri_phi   = atan2(tri_y,tri_x)   ! Use JET sign convention (anti-clockwise)
+      if (tri_phi < 0.d0) tri_phi = tri_phi + 2.d0 * 3.14159265d0  ! transform to [0, 2pi] range
       tri_theta = atan2(-(tri_Z-Z_geo),(tri_R-R_geo))   
       
 

@@ -275,7 +275,7 @@ program calculate_T_rise_in_3D_wall
 
   ! Declarations
   integer :: n_nodes, n_tri
-  integer :: i_begin=1180, i_end=2140, i_step, i_jump_steps=20, i_tri, n_qperp
+  integer :: i_begin=5000, i_end=24000, i_step, i_jump_steps=100, i_tri, n_qperp
   character(len=64) :: file_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:), ind_qperp(:)
@@ -388,24 +388,25 @@ program calculate_T_rise_in_3D_wall
 
     T_tri_hist = 0.d0
 
-    ! --- Advance the temperaure for each triangle
-    !$omp parallel shared(T_curr, dx, dt, alpha, q_perp, nt, n_qperp) &
-    !$omp private(i_tri, i_time, dTdx, i) firstprivate(T_tri_hist)
-    !$omp do
-    do i_tri=1, n_qperp
-      T_tri_hist = T_curr(i_tri,:)
-      dTdx       = q_perp(i_tri) / heat_conduct
-      do i_time=1, nt
-        !T_tri_hist = heat_diffusion_step(T_tri_hist, nx, dx, dt, alpha, dTdx, T_left) 
-        T_tri_hist(1) = T_tri_hist(1) + 2.d0* stab_param * (T_tri_hist(2) - T_tri_hist(1) + dTdx*dx) 
-        do i = 2, nx - 1
-          T_tri_hist(i) = T_tri_hist(i) + stab_param * (T_tri_hist(i+1) - 2.0d0 * T_tri_hist(i) + T_tri_hist(i-1))
-        end do
-      enddo
-      T_curr(i_tri,:) = T_tri_hist
-    enddo
-    !$omp end do
-    !$omp end parallel
+    T_curr = 0.0d0
+!    ! --- Advance the temperaure for each triangle
+!    !$omp parallel shared(T_curr, dx, dt, alpha, q_perp, nt, n_qperp) &
+!    !$omp private(i_tri, i_time, dTdx, i) firstprivate(T_tri_hist)
+!    !$omp do
+!    do i_tri=1, n_qperp
+!      T_tri_hist = T_curr(i_tri,:)
+!      dTdx       = q_perp(i_tri) / heat_conduct
+!      do i_time=1, nt
+!        !T_tri_hist = heat_diffusion_step(T_tri_hist, nx, dx, dt, alpha, dTdx, T_left) 
+!        T_tri_hist(1) = T_tri_hist(1) + 2.d0* stab_param * (T_tri_hist(2) - T_tri_hist(1) + dTdx*dx) 
+!        do i = 2, nx - 1
+!          T_tri_hist(i) = T_tri_hist(i) + stab_param * (T_tri_hist(i+1) - 2.0d0 * T_tri_hist(i) + T_tri_hist(i-1))
+!        end do
+!      enddo
+!      T_curr(i_tri,:) = T_tri_hist
+!    enddo
+!    !$omp end do
+!    !$omp end parallel
 
     do i_tri=1, n_tri
       if (ind_qperp(i_tri)>0) then

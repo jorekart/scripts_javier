@@ -162,7 +162,7 @@ program analyze_T_rise
   integer :: n_nodes, n_tri, i, i1,i2, i3, ierr
   integer :: i_begin=5000, i_end=52700, i_step, i_jump_steps=100
   character(len=64)  :: file_name
-  real(8), parameter :: R_geo=2.8, T_melt=3700
+  real(8), parameter :: R_geo=2.8, T_melt=1556
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:)
   real(8), allocatable :: Jperp(:), l_part(:), q_heat_perp_3d(:), field_wall_angle(:), T_tri(:)

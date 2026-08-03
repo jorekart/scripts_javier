@@ -115,7 +115,7 @@ module heat_diffusion
     K = max(K,60.d0)  !1283 C
     if (TC > 1283) K = 84.7 
 #else
-    ! DOI: 10.1007/978-94-00 7-7587-9_3
+    ! https://link.springer.com/book/10.1007/978-94-007-7587-9
     K = 108.34 - 1.052d-2*T + 23419.9/T
     K = min(K,173.d0) !340
     K = max(K,77.d0)  !3600
