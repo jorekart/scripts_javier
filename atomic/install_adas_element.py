@@ -64,7 +64,7 @@ rates = {
         (nitrogen, 'adf11/plt96/plt96_n.dat'),
         (oxygen,  'adf11/plt96/plt96_o.dat'),
         (neon, 'adf11/plt96/plt96_ne.dat'),
-        (argon, 'adf11/plt40/plt40_ar.dat'),
+        (argon, 'adf11/plt89/plt89_ar.dat'),
         (krypton, 'adf11/plt89/plt89_kr.dat'),
         (xenon, 'adf11/plt89/plt89_xe.dat'),
         (tungsten, 'adf11/plt50/plt50_w.dat'),

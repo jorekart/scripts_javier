@@ -190,7 +190,7 @@ def main():
 
     parser.add_argument("-q", "--quantity", default="Te", help="Te / Jphi / ne / psi")
 
-    parser.add_argument("--xcoord", default="rho_tor_norm",
+    parser.add_argument("--xcoord", default="rho_pol_norm",
                         help="x-axis coordinate: rho_tor_norm / rho_pol_norm / rho_tor / rho_pol / psi")
 
     parser.add_argument("--times", nargs="+", type=float, default=None,

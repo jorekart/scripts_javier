@@ -1,6 +1,6 @@
 1. Put all the sims to IDS (if necessary), to do that
 
-	python -u ~/DREAM/tools/h5_to_IMAS/export_multiple_sims_to_IMAS.py . --include-folders-file ./simulations_folders2imas.txt --exclude-folders-file exclude_sims.txt --pulse-start 120000 > output_dream2ids 
+python -u ~/DREAM/tools/h5_to_IMAS/export_multiple_sims_to_IMAS.py . --include-folders-file ./simulations_folders2imas.txt --exclude-folders-file exclude_sims.txt --pulse-start 120000 --profile > output_dream2ids
 
 2. Create manifest files and ingest simulations locally 
 
@@ -13,4 +13,5 @@
 
 4. Push local sim db to remote, CAREFUL, the following pushes all sims!!
 
-	simdb simulation list -l 0 --uuid | awk 'NR > 2 {print $2}' | xargs -r -I{} simdb simulation push {} --username artolaj
+	simdb simulation list -l 0 | awk 'NR > 2 && $1 != "" {print $1}' | while IFS= read -r alias; do simdb simulation push --username artolaj --replaces "$alias" iter "$alias"; done
+	
