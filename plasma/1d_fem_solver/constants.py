@@ -12,3 +12,11 @@ W_GAUSS = np.array([0.173927422568727,  0.326072577431273, 0.326072577431273,  0
 
 # Related to physics
 N_VAR = 1  # Number of variables in the system of equations
+
+MU_0      = 4*np.pi*1e-7
+E_CHARGE = 1.60217662e-19
+E_MASS   = 9.1093837e-31
+ATOMIC_MASS = 2.01  # D as reference
+ION_MASS = 1.67e-27 * ATOMIC_MASS
+KB       = 1.380649 * 1e-23
+VAREP_0  = 8.854e-12

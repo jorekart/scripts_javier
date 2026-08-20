@@ -37,8 +37,8 @@ def main():
     xvals, varvals, deltas = solution_real_space(grid, n_sub)
     create_solution_file(filename, xvals)
     store_solution(filename=filename, time=t, varvals=varvals, deltas=deltas)
-            
 
+    # Time loop
     for step in range(n_steps):
 
         print(f"Time step {step+1}/{n_steps}, Time: {t:.4f}")

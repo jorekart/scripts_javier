@@ -17,6 +17,6 @@ def initial_conditions(grid, input_params):
         x_s = node.coord[1]
         f, f_x = f1(x,2.5,0.8)
         node.values[i_var, 0] = f
-        node.values[i_var, 1] = f_x * x_s / 3
+        node.values[i_var, 1] = f_x * x_s 
 
     return grid
