@@ -8,7 +8,6 @@ def index_global(i_node, i_dof):
 
     return N_DOF_NODE * i_node + i_dof
 
-
 def construct_matrix(grid, input_params):
 
     n_dofs_tot = grid.n_dofs_tot

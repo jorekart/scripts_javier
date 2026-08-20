@@ -22,6 +22,7 @@ def get_element_contributions(element, nodes,
     # Get quantities at gaussian points
     x0_s  = np.zeros(N_GAUSS)
     f0    = np.zeros(N_GAUSS)
+    f0_s  = np.zeros(N_GAUSS)
     x0    = np.zeros(N_GAUSS)
     sizes = element.sizes
     rhs_loc = np.zeros(NODES_PER_ELEM * N_DOF_NODE)
@@ -38,11 +39,13 @@ def get_element_contributions(element, nodes,
                 x0[igauss]    +=  H[i_v,i_dof]   * sizes[i_v,i_dof] * node.coord[i_dof]
                 x0_s[igauss]  +=  H_s[i_v,i_dof] * sizes[i_v,i_dof] * node.coord[i_dof]
                 f0[igauss]    +=  H[i_v,i_dof]   * sizes[i_v,i_dof] * node.values[i_var,i_dof]
+                f0_s[igauss]  +=  H_s[i_v,i_dof] * sizes[i_v,i_dof] * node.values[i_var,i_dof]
 
     
     for igauss in range(N_GAUSS):
         x_jac = x0_s[igauss]
         var0  = f0[igauss]
+        var0_x = f0_s[igauss] / x_jac
         wg    = W_GAUSS[igauss]
         H = H_gauss[igauss]
         H_s = H_s_gauss[igauss]
@@ -53,8 +56,11 @@ def get_element_contributions(element, nodes,
             for i_dof in range(N_DOF_NODE):
                 index_ij = index_local(i_v, i_dof)
 
-                v_test =  H[i_v,i_dof] * sizes[i_v,i_dof] 
-                rhs_var = - v_test * var0 
+                v_test = H[i_v,i_dof] * sizes[i_v,i_dof]
+                v_x    = H_s[i_v,i_dof] * sizes[i_v,i_dof] / x_jac
+
+                rhs_var  = - v_x * var0_x
+                #rhs_var = - v_test * var0 
 
                 rhs_loc[index_ij] +=  rhs_var * wg * x_jac * tstep
 
@@ -64,9 +70,11 @@ def get_element_contributions(element, nodes,
                         index_kl = index_local(j_v, j_dof)
 
                         bas = H[j_v,j_dof] * sizes[j_v,j_dof] 
+                        bas_x = H_s[j_v,j_dof] * sizes[j_v,j_dof] / x_jac
 
                         amat_var = (+ v_test * (1+zeta)  * bas 
-                                    + v_test             * bas * theta * tstep )
+                                    #+ v_test             * bas * theta * tstep )
+                                    + v_x * bas_x * theta * tstep )
 
                         a_loc[index_ij,index_kl] +=  amat_var * wg * x_jac
 
