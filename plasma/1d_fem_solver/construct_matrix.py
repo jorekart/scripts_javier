@@ -45,4 +45,21 @@ def construct_matrix(grid, input_params):
 
                         a_mat[index_i, index_j] += a_loc[index_i_loc, index_j_loc]
 
+    # Apply Dirichlet boundary conditions
+    dirichlet = input_params["bnd_conditions"]["dirichlet"]
+    if (dirichlet):
+        # Left node
+        i_node = 0;  i_dof = 0
+        index_i = index_global(i_node, i_dof)
+        a_mat[index_i,:] = 0.0
+        a_mat[index_i,index_i] = 1.0
+        rhs_vec[index_i] = 0.0
+
+        # Right node
+        i_node = grid.n_nodes-1;  i_dof = 0
+        index_i = index_global(i_node, i_dof)
+        a_mat[index_i,:] = 0.0
+        a_mat[index_i,index_i] = 1.0
+        rhs_vec[index_i] = 0.0
+        
     return a_mat, rhs_vec
