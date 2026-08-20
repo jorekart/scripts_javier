@@ -7,14 +7,16 @@ def index_local(i_v, i_dof):
     return N_DOF_NODE*i_v +  i_dof  
 
 
-def get_element_contributions(element, nodes,H_gauss, H_s_gauss, H_ss_gauss):
+def get_element_contributions(element, nodes,
+                              H_gauss, H_s_gauss, H_ss_gauss, input_params):
 
     a_loc   = np.zeros((NODES_PER_ELEM * N_DOF_NODE, NODES_PER_ELEM * N_DOF_NODE))
     rhs_loc = np.zeros(NODES_PER_ELEM * N_DOF_NODE)    
 
-    # This should be read from outside
-    theta = 0.5
-    zeta  = 0.0
+    theta = input_params["time"]["theta"]
+    zeta  = input_params["time"]["zeta"]
+    tstep = input_params["time"]["tstep"]
+
     i_var = 0  # Assuming a single variable for simplicity
 
     # Get quantities at gaussian points

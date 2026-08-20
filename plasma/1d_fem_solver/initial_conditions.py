@@ -1,7 +1,7 @@
 import numpy as np
 from constants import *
 
-def initial_conditions(grid):
+def initial_conditions(grid, input_params):
     for node in grid.nodes:
         x = node.coord[0]
         node.values[0, 0] = 1.0

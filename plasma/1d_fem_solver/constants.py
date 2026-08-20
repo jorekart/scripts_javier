@@ -12,5 +12,3 @@ W_GAUSS = np.array([0.173927422568727,  0.326072577431273, 0.326072577431273,  0
 
 # Related to physics
 N_VAR = 1  # Number of variables in the system of equations
-
-tstep = 0.01

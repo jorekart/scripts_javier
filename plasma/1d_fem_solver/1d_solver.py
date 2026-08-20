@@ -1,5 +1,6 @@
 # This code solves a 1D equation with finite elements
 import numpy as np
+import yaml
 
 from constants import *
 from grid import update_node_values, grid_input_params_class, build_grid_1D
@@ -10,27 +11,25 @@ from hdf5_export import solution_real_space, store_solution, create_solution_fil
 def main():
     print('This code solves a 1D equation with finite elements')
 
-    # Hardcoded parameters/ read input file?
+    # Read input file parameters
+    with open("input.yaml", "r") as f:
+        input_params = yaml.safe_load(f)
 
+    time_params = input_params["time"]
+    print(time_params)
 
-    # Build and initialize the grid
-    grid_input_params = grid_input_params_class(x_min=0.0, 
-                                                x_max=5.0, 
-                                                x_acc1=0.0,
-                                                x_acc2=1.0,
-                                                x_sig1=0.3,
-                                                x_sig2=0.3,
-                                                n_elements=100)
-
-    grid = build_grid_1D(grid_input_params)
+    # Create grid
+    grid_params = grid_input_params_class(**input_params["mesh"])
+    grid = build_grid_1D(grid_params)
 
     # Apply initial conditions to values and deltas at nodes
-    grid = initial_conditions(grid)
+    grid = initial_conditions(grid, input_params)
 
     # Start time loop
-    t = 0.0
-    n_steps = 101
-    n_out = 20
+    t = time_params["t_0"]
+    n_steps = time_params["n_steps"]
+    n_out = time_params["n_out"]
+    tstep = time_params["tstep"]
     filename = "solution.h5"
     n_sub = 4
 
@@ -45,7 +44,7 @@ def main():
         print(f"Time step {step+1}/{n_steps}, Time: {t:.4f}")
 
         # Collect element contributions from equations left hand side and right hand side
-        a_mat, rhs_vec = construct_matrix(grid)
+        a_mat, rhs_vec = construct_matrix(grid, input_params)
 
         # Solve the system of equations
         sol = np.linalg.solve(a_mat, rhs_vec)
