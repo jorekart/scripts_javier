@@ -20,3 +20,4 @@ ATOMIC_MASS = 2.01  # D as reference
 ION_MASS = 1.67e-27 * ATOMIC_MASS
 KB       = 1.380649 * 1e-23
 VAREP_0  = 8.854e-12
+GAMMA_AD = 5.0/3.0

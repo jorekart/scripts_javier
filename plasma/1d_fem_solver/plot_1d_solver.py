@@ -62,7 +62,7 @@ def plot_solution(
             plt.plot(
                 xvals,
                 varvals[it, :],
-                label=f"t = {times[it]} s"
+                label=f"t = {times[it]*1e3} ms"
             )
 
         plt.xlabel("x")

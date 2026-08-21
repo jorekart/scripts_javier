@@ -12,11 +12,19 @@ def initial_conditions(grid, input_params):
 
     i_var = 0
 
+    Te0 = input_params["physics"]["Te0"]
+    Te0_bnd = input_params["physics"]["Te0_bnd"]
+    x_min = input_params["mesh"]["x_min"]
+    x_max = input_params["mesh"]["x_max"]
+    L0  = x_max - x_min
+    Lmid = L0*0.5
+    width = Lmid*0.3
+
     for inode, node in enumerate(grid.nodes):
         x = node.coord[0] 
         x_s = node.coord[1]
-        f, f_x = f1(x,2.5,0.8)
-        node.values[i_var, 0] = f
-        node.values[i_var, 1] = f_x * x_s 
+        f, f_x = f1(x,Lmid,width)
+        node.values[i_var, 0] = f * (Te0-Te0_bnd) + Te0_bnd 
+        node.values[i_var, 1] = f_x * x_s * (Te0-Te0_bnd)
 
     return grid

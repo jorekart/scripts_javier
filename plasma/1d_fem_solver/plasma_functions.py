@@ -51,10 +51,14 @@ def coulomb_log_ee(Te, ne):
     
     return Coulomb_Log
 
-def eta_spitzer(Te, ne, Zeff):
+def eta_spitzer(Te_in, ne, Zeff):
+    Te = np.max([Te_in, 1.0])
     coef_Zeff = Zeff*(1.+1.198*Zeff+0.222*Zeff**2)/(1.+2.966*Zeff+0.753*Zeff**2) / ((1.+1.198+0.222)/(1.+2.966+0.753))
     eta = 1.65e-9 * coulomb_log(Te, ne) * (Te*0.001)**(-1.5) * coef_Zeff # From Wesson
-    return eta
+    eta_T = -1.5 * 1.65e-9 * coulomb_log(Te, ne) * (Te*0.001)**(-2.5) * coef_Zeff * 1e-3
+    if (Te_in <= 1.0):
+        eta_T = 0.0
+    return eta, eta_T
 
 def collision_time_ei(Te, ne, Zeff, ni):
     # Wesson 4th edition page 65
@@ -72,3 +76,11 @@ def collision_time_ii(Ti, ne, Zeff, ni):
 
 def e_collision_mean_free_path(Te, ne, Zeff, ni):
     return v_thermal_e(Te) * collision_time_ei(Te, ne, Zeff, ni)
+
+def heat_diff_spitzer(Te, ne, Te_min):
+    TeKeV = np.max([Te, Te_min]) * 1e-3 
+    chi = 3.6e29 * TeKeV**(2.5) / ne
+    chi_T = 9.0e29 * TeKeV**(1.5) / ne * 1e-3
+    if (Te <= Te_min):
+        chi_T = 0.0
+    return chi, chi_T
