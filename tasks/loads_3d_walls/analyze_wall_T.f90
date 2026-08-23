@@ -5,10 +5,18 @@ program analyze_wall_T
 
   implicit none
 
+#ifdef BE_WALL
+    real*8,  parameter :: T_melt = 1556 ! T (K)
+#elif defined(W_alloy)
+    real*8,  parameter :: T_melt = 1800 ! T(K), approximate for W97Ni2Fe1 
+#else
+    real*8,  parameter :: T_melt = 3695 ! T(K)
+#endif
+
   ! Declarations
   integer :: n_nodes, n_tri, i, i1,i2, i3, ierr
   integer :: i_begin, i_end, i_step, i_jump_steps
-  real(8), parameter :: R_geo=2.8, T_melt=1556
+  real(8) :: R_geo=2.8d0, Z_geo=0.d0 ! R_geo, Z_geo for theta calculation
   character(len=64)    :: file_name, wall_f_name
   real(8), allocatable :: nodes_xyz(:,:)
   integer, allocatable :: indices(:,:)
@@ -18,7 +26,7 @@ program analyze_wall_T
   real(8), dimension(3):: v21, v31, norm_tria
   real(8), allocatable :: T_max(:), melt_duration(:), E_dep(:), tri_areas(:)
 
-  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name)
+  call read_namelist(i_begin, i_end, i_jump_steps, wall_f_name, R_geo=R_geo, Z_geo=Z_geo)
 
   do i_step = i_begin, i_end, i_jump_steps
     
@@ -81,9 +89,7 @@ program analyze_wall_T
     tri_R = sqrt(tri_x**2 +tri_y**2)
 
     tri_phi   = atan2(-tri_y,tri_x)
-    tri_theta = atan2(-(tri_Z-0.0d0),(tri_R-R_geo))
-
-    tri_theta = atan2(-(tri_Z-1.49),(tri_R-2.6)) ! UDP arc center
+    tri_theta = atan2(-(tri_Z-Z_geo),(tri_R-R_geo))
 
     write(20, '(6ES14.6)') tri_phi, tri_theta, T_max(i), melt_duration(i), E_dep(i), tri_areas(i)
 
