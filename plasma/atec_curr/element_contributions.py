@@ -1,7 +1,7 @@
 import numpy as np
 from constants import *
 from plasma_functions import c_sound, eta_spitzer
-from atomic_rates import ionisation_rate, recombination_rate
+from atomic_rates import ionisation_rate, recombination_rate, line_radiation_coefficient, continuum_radiation_coefficient
 
 
 def index_local(i_var, i_v, i_dof):
@@ -41,6 +41,9 @@ def get_element_contributions(element, nodes,
 
     # minimum temperature used in the sound speed [eV]
     T_min_cs = float(input_params["physics"]["T_min_cs"])
+
+    # no radiation losses (ADAS line + continuum) below this electron temperature [eV]
+    T_min_rad = float(input_params["physics"]["T_min_rad"])
 
     # energy lost by the plasma per ionization [eV]
     E_ionization = float(input_params["physics"]["E_ionization"])
@@ -110,6 +113,38 @@ def get_element_contributions(element, nodes,
         L_ion_n = E_ion_norm * (n_neutral * S_ion + n0 * (n_neutral_n * S_ion + n_neutral * S_ion_n))
         L_ion_T = E_ion_norm * n0 * n_neutral * S_ion_T
 
+        # ADAS radiation, W*m^3 coefficients and their derivatives converted to the normalized n and T.
+        # Powers are in W/m^3, normalized like the pressure equation (divided by e*n_ref*T_ref)
+        c_power_norm = 1.0 / (E_CHARGE * n_ref * T_ref)
+
+        PLT, PLT_n, PLT_T = line_radiation_coefficient(ne_SI, Te_eV)         # neutral line radiation
+        PRB, PRB_n, PRB_T = continuum_radiation_coefficient(ne_SI, Te_eV)    # recombination + bremsstrahlung
+        PLT_n, PRB_n = PLT_n * n_ref, PRB_n * n_ref
+        PLT_T, PRB_T = PLT_T * T_ref, PRB_T * T_ref
+
+        # The PRB radiation contains the ionization potential released in the recombination, which was
+        # already removed from the electrons at the ionization (E_ionization): subtract it to avoid
+        # double counting, P_rad = (L_PRB - S_rec*phi_ion) n_e n_i   (Eq. 18 of Phys. Plasmas 30, 042509)
+        phi_ion = E_ionization * E_CHARGE      # [J]
+        PRB   = PRB   - phi_ion * S_rec
+        PRB_n = PRB_n - phi_ion * S_rec_n
+        PRB_T = PRB_T - phi_ion * S_rec_T
+
+        # line radiation: n_e * n_neutral * PLT
+        P_line   = c_power_norm * ne_SI * n_neutral * PLT
+        P_line_n = c_power_norm * (n_ref * n_neutral * PLT + ne_SI * n_neutral_n * PLT + ne_SI * n_neutral * PLT_n)
+        P_line_T = c_power_norm * ne_SI * n_neutral * PLT_T
+
+        # continuum radiation: n_e * n_i * PRB (n_i = n_e)
+        P_cont   = c_power_norm * ne_SI**2 * PRB
+        P_cont_n = c_power_norm * (2.0 * n_ref * ne_SI * PRB + ne_SI**2 * PRB_n)
+        P_cont_T = c_power_norm * ne_SI**2 * PRB_T
+
+        # radiation losses are switched off below T_min_rad
+        if Te_eV < T_min_rad:
+            P_line, P_line_n, P_line_T = 0.0, 0.0, 0.0
+            P_cont, P_cont_n, P_cont_T = 0.0, 0.0, 0.0
+
         # Jsat and its derivatives with respect to the normalized n and T
         J_sat   = E_CHARGE * ne_SI * cs0
         J_sat_n = E_CHARGE * n_ref * cs0
@@ -120,10 +155,9 @@ def get_element_contributions(element, nodes,
         eta_T = eta_T * T_ref
 
         # Ohmic heating eta*J^2 [W/m^3], normalized like the pressure equation (divided by e*n_ref*T_ref)
-        c_ohm_norm = 1.0 / (E_CHARGE * n_ref * T_ref)
-        S_ohm   = ohmic_on * c_ohm_norm * eta * J_sat**2
-        S_ohm_n = ohmic_on * c_ohm_norm * 2.0 * eta * J_sat * J_sat_n
-        S_ohm_T = ohmic_on * c_ohm_norm * (eta_T * J_sat**2 + 2.0 * eta * J_sat * J_sat_T)
+        S_ohm   = ohmic_on * c_power_norm * eta * J_sat**2
+        S_ohm_n = ohmic_on * c_power_norm * 2.0 * eta * J_sat * J_sat_n
+        S_ohm_T = ohmic_on * c_power_norm * (eta_T * J_sat**2 + 2.0 * eta * J_sat * J_sat_T)
 
         wg = W_GAUSS[igauss]
         H = H_gauss[igauss]
@@ -149,6 +183,7 @@ def get_element_contributions(element, nodes,
                 rhs_T  += - v_test * 2.0 * gamma_sheath * n0 * T0 * cs0 / L_par
                 rhs_T  += v_test * S_ohm
                 rhs_T  += - v_test * L_ion
+                rhs_T  += - v_test * (P_line + P_cont)
 
                 rhs_loc[index_T] +=  rhs_T * wg * x_jac * tstep
 
@@ -185,6 +220,7 @@ def get_element_contributions(element, nodes,
                         amat_T += v_test * bas * 2.0 * gamma_sheath * n0 * (cs0 + T0 * cs0_T) / L_par * theta * tstep
                         amat_T += - v_test * bas * S_ohm_T * theta * tstep
                         amat_T += v_test * bas * L_ion_T * theta * tstep
+                        amat_T += v_test * bas * (P_line_T + P_cont_T) * theta * tstep
 
                         a_loc[index_T,index_T_kl] +=  amat_T * wg * x_jac
 
@@ -195,6 +231,7 @@ def get_element_contributions(element, nodes,
                         amat_Tn += v_test * bas * 2.0 * gamma_sheath * T0 * cs0 / L_par * theta * tstep
                         amat_Tn += - v_test * bas * S_ohm_n * theta * tstep
                         amat_Tn += v_test * bas * L_ion_n * theta * tstep
+                        amat_Tn += v_test * bas * (P_line_n + P_cont_n) * theta * tstep
 
                         a_loc[index_T,index_n_kl] +=  amat_Tn * wg * x_jac
 

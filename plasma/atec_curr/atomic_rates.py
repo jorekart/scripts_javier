@@ -2,7 +2,7 @@
 Ionization and recombination rate coefficients of deuterium from OpenADAS (through CHERAB),
 loaded the same way as in atomic/coronal_eq_solver.py.
 
-Units: n_e in m^-3, T_e in eV, rates in m^3/s.
+Units: n_e in m^-3, T_e in eV, rates in m^3/s, radiated power coefficients in W*m^3.
 Needs the CHERAB module (e.g. `module load CHERAB/1.5.0-gfbf-2023b`).
 """
 import numpy as np
@@ -12,6 +12,8 @@ from cherab.openadas import OpenADAS
 _adas = OpenADAS(permit_extrapolation=False)
 _rate_ion   = _adas.ionisation_rate(deuterium, 0)      # D0 -> D+
 _rate_recom = _adas.recombination_rate(deuterium, 1)   # D+ -> D0
+_rate_line  = _adas.line_radiated_power_rate(deuterium, 0)        # line radiation of D0 (PLT)
+_rate_cont  = _adas.continuum_radiated_power_rate(deuterium, 1)   # recombination + bremsstrahlung of D+ (PRB)
 
 # Relative step of the finite differences used for the derivatives
 _REL_STEP = 1.0e-3
@@ -71,3 +73,21 @@ def ionisation_rate(n_e, t_e):
 def recombination_rate(n_e, t_e):
     """alpha(n_e, T_e) [m^3/s] and dalpha/dn_e, dalpha/dT_e. Held constant outside the ADAS table."""
     return _rate_and_derivatives(_rate_recom, n_e, t_e)
+
+
+def line_radiation_coefficient(n_e, t_e):
+    """
+    PLT(n_e, T_e) [W*m^3] and its derivatives with respect to n_e and T_e.
+    Line radiated power density of the neutrals = n_e * n_neutral * PLT.
+    Zero below the lower T_e limit of the ADAS table (excitation vanishes at low T_e).
+    """
+    return _rate_and_derivatives(_rate_line, n_e, t_e, zero_below_range=True)
+
+
+def continuum_radiation_coefficient(n_e, t_e):
+    """
+    PRB(n_e, T_e) [W*m^3] and its derivatives with respect to n_e and T_e.
+    Recombination and bremsstrahlung radiated power density = n_e * n_i * PRB.
+    Held constant outside the ADAS table.
+    """
+    return _rate_and_derivatives(_rate_cont, n_e, t_e)
