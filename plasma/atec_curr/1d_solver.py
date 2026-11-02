@@ -1,6 +1,5 @@
-# This code solves two 1D diffusion equations with finite elements:
-#   dn/dt = d/dx( D_perp   dn/dx )   particle density
-#   dT/dt = d/dx( chi_perp dT/dx )   temperature
+# This code solves three 1D equations with finite elements (see element_contributions.py):
+#   particle density n, temperature T (pressure equation) and neutral density nn
 import sys
 import numpy as np
 import yaml
@@ -9,7 +8,9 @@ from constants import *
 from grid import update_node_values, grid_input_params_class, build_grid_1D
 from construct_matrix import construct_matrix
 from initial_conditions import initial_conditions
-from hdf5_export import solution_real_space, store_solution, create_solution_file
+from hdf5_export import solution_real_space, store_solution, create_solution_file, store_balance
+from basis import basisfunctions_gauss
+from balance import particle_balance, print_balance
 
 
 def as_list(value, dtype):
@@ -22,11 +23,12 @@ def as_list(value, dtype):
 
 
 def main(input_filename="input.yaml", filename="solution.h5"):
-    print('This code solves the 1D diffusion equations for n and T with finite elements')
+    print('This code solves the 1D equations for n, T and nn with finite elements')
 
     # Read input file parameters
     with open(input_filename, "r") as f:
-        input_params = yaml.safe_load(f)
+        input_text = f.read()
+    input_params = yaml.safe_load(input_text)
 
     time_params = input_params["time"]
     print(time_params)
@@ -50,12 +52,16 @@ def main(input_filename="input.yaml", filename="solution.h5"):
     step_sizes = np.repeat(tsteps, n_steps_list)    # time step of every step
     n_steps = len(step_sizes)
     n_sub = 4
-    ref_values = [input_params["normalization"][name + "_ref"] for name in VAR_NAMES]
+    ref_values = [input_params["normalization"][REF_NAMES[name]] for name in VAR_NAMES]
+    H_gauss, H_s_gauss, H_ss_gauss = basisfunctions_gauss()   # for the particle balance
 
     # Store initial grid and create file
     xvals, varvals = solution_real_space(grid, n_sub, ref_values)
-    create_solution_file(filename, xvals)
+    create_solution_file(filename, xvals, input_text, input_params)
     store_solution(filename=filename, time=t, varvals=varvals)
+    balance = particle_balance(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, t)
+    store_balance(filename, balance)
+    print_balance(balance)
 
     # Time loop
     for step in range(n_steps):
@@ -79,15 +85,19 @@ def main(input_filename="input.yaml", filename="solution.h5"):
         # advance time
         t += tstep
 
-        # store solution
-        if (np.mod(step,n_out)==0):
+        # store solution and particle balance (always at the last step)
+        if (np.mod(step,n_out)==0) or (step == n_steps - 1):
             print(f"Storing solution for step = {step+1}")
             xvals, varvals = solution_real_space(grid, n_sub, ref_values)
             store_solution(filename=filename, time=t, varvals=varvals)
+            balance = particle_balance(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, t)
+            store_balance(filename, balance)
+            print_balance(balance)
 
     print('Time loop finished')
+    print(f"Integral of J_sat along the profile at t = {t:.4e} s: {balance['I_sat']:.4e} A/m")
 
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:2])
+    main(*sys.argv[1:3])   # python 1d_solver.py [input.yaml] [solution.h5]

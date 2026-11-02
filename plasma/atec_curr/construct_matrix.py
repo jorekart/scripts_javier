@@ -32,12 +32,19 @@ def construct_matrix(grid, input_params):
         rhs_vec[index_glob] += rhs_loc
         a_mat[np.ix_(index_glob, index_glob)] += a_loc
 
-    # Apply Dirichlet boundary conditions (left and right ends, for each variable).
+    # Apply Dirichlet boundary conditions (left and right ends) for n, T and nn.
     # The unknown is the change of the value, so the rhs is (target - current value).
+    # Reflective (zero flux) conditions are the natural condition of the weak form, so nothing is
+    # imposed for them: the sides listed in "reflective", and nn at both ends if it has no entry.
     bnd_conditions = input_params["bnd_conditions"]
-    for i_var, name in enumerate(VAR_NAMES):
-        ref = input_params["normalization"][name + "_ref"]   # variables are normalized
+    for i_var, name in ((I_N, "n"), (I_T, "T"), (I_NN, "nn")):
+        if name not in bnd_conditions:
+            continue
+        ref = input_params["normalization"][REF_NAMES[name]]   # variables are normalized
+        reflective = bnd_conditions[name].get("reflective", [])
         for i_node, side in ((0, "left"), (grid.n_nodes - 1, "right")):
+            if side in reflective:
+                continue
             index_i = index_global(i_node, i_var, 0)
             a_mat[index_i,:] = 0.0
             a_mat[index_i,index_i] = 1.0

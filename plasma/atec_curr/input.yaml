@@ -1,6 +1,6 @@
 mesh:
   x_min: 0.0
-  x_max: 0.1
+  x_max: 0.05
 
   x_acc1: 0.0
   x_acc2: 1.0
@@ -11,8 +11,10 @@ mesh:
   n_elements: 50
 
 time:
-  tstep: [1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-7, 1.0e-6, 3.0e-6]   # time step of each stage [s]
-  n_steps: [20,     20,       20,    100, 40, 40, 300]           # number of steps of each stage
+  #tstep: [1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-7, 1.0e-6, 3.0e-6]   # time step of each stage [s]
+  #n_steps: [20,     20,       20,    100, 40, 40, 300]           # number of steps of each stage
+  tstep: [1e-7, 1e-6, 1.0e-5, 3e-5, 1e-4]   # time step of each stage [s]
+  n_steps: [ 10, 10, 10,  30, 70]           # number of steps of each stage
   n_out: 10
   t_0: 0.0
   theta: 0.5
@@ -28,18 +30,25 @@ physics:
   chi_perp: 3.0    # heat diffusion coefficient [m^2/s]
   L_par: 0.5       # Parallel length of the field line
   gamma_sheath: 7.0  # sheath heat transmission coefficient
-  n_tot: 5.0e+20   # constant total density n + n_neutral; neutrals n0 = n_tot - n feed the ionization source [m^-3]
-  t_ohmic_on: 1.0124e-3 # ohmic heating is switched on at this time [s]
-  T_min_rad: 0.5      # no ADAS radiation losses below this electron temperature [eV]
+  n_neutral_0: 0.0e+21  # initial neutral density, flat [m^-3] (boundary conditions in bnd_conditions.nn)
+  D_n: 50.0             # neutral diffusion coefficient [m^2/s]
+  R_recycling: 1.0      # fraction of the ions lost to the sheath that return as neutrals
+  t_ohmic_on: 1.0 #1.0124e-3 # ohmic heating is switched on at this time [s]
+  T_min_rad: 0.1      # no ADAS radiation losses below this electron temperature [eV]
   E_ionization: 13.6  # energy lost per ionization [eV]
   T_min_cs: 1.0    # minimum temperature used in the sound speed [eV]
   n_floor: 1.0e+17 # minimum n in the time derivative of the pressure equation [m^-3]
 
-# Dirichlet conditions at both ends (the initial profile is parabolic between them)
+# Dirichlet conditions at both ends (the initial profile decays exponentially between them, see initial_conditions.py).
+# Sides listed in "reflective" get a zero flux condition instead; their value is only used for the initial profile.
 bnd_conditions:
   n:
     left: 5.0e+20   # [m^-3]
     right: 0
+    reflective: [right]
   T:
     left: 50.0      # [eV]
     right: 0.1
+  nn:               # the initial profile is flat (n_neutral_0); without this entry nn is reflective at both ends
+    left: 0.0       # [m^-3] neutrals leave the domain at the hot end
+    reflective: [right]

@@ -11,10 +11,14 @@ S_GAUSS = np.array([0.0694318442029735, 0.3300094782075720, 0.6699905217924280, 
 W_GAUSS = np.array([0.173927422568727,  0.326072577431273, 0.326072577431273,  0.173927422568727])    # Weights of Gaussian points
 
 # Variables of the system of equations
-VAR_NAMES = ["n", "T"]   # particle density, temperature
+VAR_NAMES = ["n", "T", "nn"]   # particle density, temperature, neutral density
 N_VAR = len(VAR_NAMES)
-I_N = 0
-I_T = 1
+I_N  = 0
+I_T  = 1
+I_NN = 2
+
+# Reference value used to normalize each variable (the neutral density is normalized with n_ref)
+REF_NAMES = {"n": "n_ref", "T": "T_ref", "nn": "n_ref"}
 
 # Related to physics
 E_CHARGE = 1.60217662e-19

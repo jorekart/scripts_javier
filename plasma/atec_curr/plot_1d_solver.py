@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
-VAR_LABELS = {"n": r"$n$ [m$^{-3}$]", "T": r"$T$ [eV]"}
+VAR_LABELS = {"n": r"$n$ [m$^{-3}$]", "T": r"$T$ [eV]", "nn": r"$n_{neutral}$ [m$^{-3}$]"}
 
 
 def plot_solution(
@@ -13,7 +13,7 @@ def plot_solution(
     save=None,
 ):
     """
-    Plot the n and T profiles over time from an HDF5 solution file.
+    Plot the n, T and neutral density profiles over time from an HDF5 solution file.
 
     Parameters
     ----------
@@ -35,14 +35,14 @@ def plot_solution(
     with h5py.File(filename, "r") as f:
         xvals = f["xvals"][:]
         times = f["time"][:]
-        profiles = {name: f[name][:] for name in VAR_LABELS}
+        profiles = {name: f[name][:] for name in VAR_LABELS if name in f}   # older files have no "nn"
 
     if selected_times is not None:
         indices = [np.argmin(np.abs(times - t)) for t in selected_times]
     else:
         indices = np.linspace(0, len(times) - 1, min(n_slices, len(times)), dtype=int)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True)
+    fig, axes = plt.subplots(1, len(profiles), figsize=(6 * len(profiles), 5), sharex=True)
     colors = plt.cm.viridis(np.linspace(0, 1, len(indices)))
 
     for ax, (name, values) in zip(axes, profiles.items()):

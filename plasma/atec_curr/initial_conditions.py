@@ -1,32 +1,61 @@
 import numpy as np
 from constants import *
+from plasma_functions import c_sound
 
 
 def initial_conditions(grid, input_params):
     """
-    Parabolic profile from the left to the right boundary value, for each variable:
-    f(x) = right + (left - right) * (1 - s^2),  s = (x - x_min) / L
-    i.e. zero slope at the left end and the boundary values at both ends.
+    Exponentially decaying profile from the left (hot end) to the right boundary value, for n and T:
+    f(x) = right + (left - right) * (exp(-d/lambda) - exp(-L/lambda)) / (1 - exp(-L/lambda)),  d = x - x_min
+    i.e. the boundary values at both ends and decay length lambda.
+    The decay lengths are estimated from the balance of the perpendicular diffusion with the sheath losses,
+    with the sound speed at half the temperature of the hot end:
+        n: D_perp   n'' = 2 n cs / L_par           -> lambda_n = sqrt(D_perp L_par / (2 cs))
+        T: chi_perp T'' = 2 gamma_sheath T cs / L_par -> lambda_T = sqrt(chi_perp L_par / (2 gamma_sheath cs))
+    Flat profile n_neutral_0 for the neutral density.
     """
 
     x_min = input_params["mesh"]["x_min"]
     x_max = input_params["mesh"]["x_max"]
     L0  = x_max - x_min
 
-    for i_var, name in enumerate(VAR_NAMES):
-        left  = input_params["bnd_conditions"][name]["left"]
-        right = input_params["bnd_conditions"][name]["right"]
+    D_perp   = float(input_params["physics"]["D_perp"])
+    chi_perp = float(input_params["physics"]["chi_perp"])
+    L_par    = float(input_params["physics"]["L_par"])
+    gamma_sheath = float(input_params["physics"]["gamma_sheath"])
+
+    # sound speed at half the temperature of the hot end
+    T_est = 0.5 * float(input_params["bnd_conditions"]["T"]["left"])
+    cs_est, cs_est_T = c_sound(T_est, T_est)
+
+    decay_length = {"n": np.sqrt(D_perp   * L_par / (2.0 * cs_est)),
+                    "T": np.sqrt(chi_perp * L_par / (2.0 * gamma_sheath * cs_est))}
+    print(f"Initial profiles: cs({T_est:.3g} eV) = {cs_est:.3e} m/s, decay lengths "
+          f"lambda_n = {decay_length['n']*1e3:.3g} mm, lambda_T = {decay_length['T']*1e3:.3g} mm")
+
+    for i_var, name in ((I_N, "n"), (I_T, "T")):
+        left  = float(input_params["bnd_conditions"][name]["left"])
+        right = float(input_params["bnd_conditions"][name]["right"])
 
         # normalized variables
-        ref   = input_params["normalization"][name + "_ref"]
+        ref   = input_params["normalization"][REF_NAMES[name]]
         left  = left / ref
         right = right / ref
+
+        lam = decay_length[name]
+        e_L = np.exp(-L0 / lam)
 
         for node in grid.nodes:
             x = node.coord[0]
             x_s = node.coord[1]
-            s = (x - x_min) / L0
-            node.values[i_var, 0] = right + (left - right) * (1.0 - s**2)
-            node.values[i_var, 1] = - (left - right) * 2.0 * s / L0 * x_s
+            e_x = np.exp(-(x - x_min) / lam)
+            node.values[i_var, 0] = right + (left - right) * (e_x - e_L) / (1.0 - e_L)
+            node.values[i_var, 1] = - (left - right) * e_x / (lam * (1.0 - e_L)) * x_s
+
+    # flat neutral density (normalized)
+    nn_init = float(input_params["physics"]["n_neutral_0"]) / input_params["normalization"][REF_NAMES["nn"]]
+    for node in grid.nodes:
+        node.values[I_NN, 0] = nn_init
+        node.values[I_NN, 1] = 0.0
 
     return grid
