@@ -1,6 +1,6 @@
 import numpy as np
 from constants import *
-from plasma_functions import c_sound
+from plasma_functions import c_sound, L_parallel
 
 
 def initial_conditions(grid, input_params):
@@ -9,7 +9,7 @@ def initial_conditions(grid, input_params):
     f(x) = right + (left - right) * (exp(-d/lambda) - exp(-L/lambda)) / (1 - exp(-L/lambda)),  d = x - x_min
     i.e. the boundary values at both ends and decay length lambda.
     The decay lengths are estimated from the balance of the perpendicular diffusion with the sheath losses,
-    with the sound speed at half the temperature of the hot end:
+    with L_par at the hot end and the sound speed at a fraction of the temperature of the hot end:
         n: D_perp   n'' = 2 n cs / L_par           -> lambda_n = sqrt(D_perp L_par / (2 cs))
         T: chi_perp T'' = 2 gamma_sheath T cs / L_par -> lambda_T = sqrt(chi_perp L_par / (2 gamma_sheath cs))
     Flat profile n_neutral_0 for the neutral density.
@@ -21,12 +21,13 @@ def initial_conditions(grid, input_params):
 
     D_perp   = float(input_params["physics"]["D_perp"])
     chi_perp = float(input_params["physics"]["chi_perp"])
-    L_par    = float(input_params["physics"]["L_par"])
+    L_par    = L_parallel(x_min, float(input_params["physics"]["h_gap"]),
+                          float(input_params["physics"]["theta_panel"]), float(input_params["physics"]["d_gap_min"]))
     gamma_sheath = float(input_params["physics"]["gamma_sheath"])
 
     # sound speed at half the temperature of the hot end
     T_est = 0.5 * float(input_params["bnd_conditions"]["T"]["left"])
-    cs_est, cs_est_T = c_sound(T_est, T_est)
+    cs_est, cs_est_T = c_sound(T_est, 0.0)      # cold ions, as in the equations
 
     decay_length = {"n": np.sqrt(D_perp   * L_par / (2.0 * cs_est)),
                     "T": np.sqrt(chi_perp * L_par / (2.0 * gamma_sheath * cs_est))}

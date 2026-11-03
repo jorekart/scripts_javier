@@ -13,9 +13,16 @@ def v_thermal_i(Ti):
     Ti_SI    = Ti * E_CHARGE / KB
     return (KB*Ti_SI/ION_MASS)**0.5
 
+def L_parallel(x, h_gap, theta_panel, d_gap_min):
+    """
+    Parallel connection length [m] between neighbouring roof-top panels at depth x [m] in the shadow region:
+    L_par = max( (h_gap - x) / tan(theta_panel), d_gap_min ),  theta_panel in degrees
+    """
+    return max((h_gap - x) / np.tan(np.radians(theta_panel)), d_gap_min)
+
 def c_sound(Te,Ti): # Temperatures in eV
     cs = ((Te+Ti)*E_CHARGE/ION_MASS)**0.5
-    cs_T = cs / (2.0 * (Te+Ti)) * 2.0   # d cs / dT [m/s/eV], assuming Te = Ti = T
+    cs_T = cs / (2.0 * (Te+Ti))         # d cs / dTe [m/s/eV], at fixed Ti
     return cs, cs_T
 
 def v_perp_i(Ti):
@@ -45,12 +52,13 @@ def coulomb_log(Te, ne):
     # limit the arguments (the density can undershoot below zero in the solver)
     Te = np.maximum(Te, COULOMB_LOG_TE_MIN)
     ne = np.maximum(ne, COULOMB_LOG_NE_MIN)
-    if np.ndim(Te)>0:
+    if np.ndim(Te)>0 or np.ndim(ne)>0:
+        Te, ne = np.broadcast_arrays(np.asarray(Te, dtype=float), np.asarray(ne, dtype=float))
         mask1 = Te < 10
         mask2 = ~mask1
         Coulomb_Log = np.copy(Te)
-        Coulomb_Log[mask1] = 23.0000 - np.log((ne*1e-6)**0.5*Te[mask1]**(-1.5))
-        Coulomb_Log[mask2] = 24.1513 - np.log((ne*1e-6)**0.5*Te[mask2]**(-1.0))
+        Coulomb_Log[mask1] = 23.0000 - np.log((ne[mask1]*1e-6)**0.5*Te[mask1]**(-1.5))
+        Coulomb_Log[mask2] = 24.1513 - np.log((ne[mask2]*1e-6)**0.5*Te[mask2]**(-1.0))
     else:
         if (Te<10):
             Coulomb_Log = 23.0000 - np.log((ne*1e-6)**0.5*Te**(-1.5))

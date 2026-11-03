@@ -1,6 +1,6 @@
 import numpy as np
 from constants import *
-from plasma_functions import c_sound
+from plasma_functions import c_sound, L_parallel
 from atomic_rates import ionisation_rate, recombination_rate
 from element_contributions import get_element_contributions, index_local
 
@@ -53,7 +53,9 @@ def boundary_fluxes(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, time):
 
 def particle_balance(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, time):
 
-    L_par       = float(input_params["physics"]["L_par"])
+    h_gap       = float(input_params["physics"]["h_gap"])
+    theta_panel = float(input_params["physics"]["theta_panel"])
+    d_gap_min   = float(input_params["physics"]["d_gap_min"])
     R_recycling = float(input_params["physics"]["R_recycling"])
     T_min_cs    = float(input_params["physics"]["T_min_cs"])
     n_ref = float(input_params["normalization"]["n_ref"])
@@ -70,11 +72,12 @@ def particle_balance(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, time):
             H = H_gauss[igauss]
             H_s = H_s_gauss[igauss]
 
-            x_jac = 0.0
+            x0, x_jac = 0.0, 0.0
             n0, T0, nn0 = 0.0, 0.0, 0.0
             for i_v in range(NODES_PER_ELEM):
                 node = nodes[i_v]
                 for i_dof in range(N_DOF_NODE):
+                    x0    += H[i_v,i_dof]   * sizes[i_v,i_dof] * node.coord[i_dof]
                     x_jac += H_s[i_v,i_dof] * sizes[i_v,i_dof] * node.coord[i_dof]
                     n0    += H[i_v,i_dof]   * sizes[i_v,i_dof] * node.values[I_N,i_dof]
                     T0    += H[i_v,i_dof]   * sizes[i_v,i_dof] * node.values[I_T,i_dof]
@@ -84,8 +87,9 @@ def particle_balance(grid, input_params, H_gauss, H_s_gauss, H_ss_gauss, time):
             Te_eV = T0 * T_ref
             n_neutral = nn0 * n_ref
 
+            L_par = L_parallel(x0, h_gap, theta_panel, d_gap_min)
             Te_cs = max(Te_eV, T_min_cs)
-            cs0, cs0_T = c_sound(Te_cs, Te_cs)
+            cs0, cs0_T = c_sound(Te_cs, 0.0)        # cold ions, as in element_contributions.py
             S_ion = ionisation_rate(ne_SI, Te_eV)[0]
             S_rec = recombination_rate(ne_SI, Te_eV)[0]
 

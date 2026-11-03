@@ -28,8 +28,11 @@ normalization:
 physics:
   D_perp: 3.0      # particle diffusion coefficient [m^2/s]
   chi_perp: 3.0    # heat diffusion coefficient [m^2/s]
-  L_par: 0.5       # Parallel length of the field line
-  gamma_sheath: 7.0  # sheath heat transmission coefficient
+  # parallel connection length between the roof-top panels: L_par(x) = max( (h_gap - x)/tan(theta_panel), d_gap_min )
+  h_gap: 0.045        # depth of the V, where (h_gap - x)/tan(theta_panel) would vanish (placeholder) [m]
+  theta_panel: 7.2    # angle between the field line and the panel surface (placeholder) [deg]
+  d_gap_min: 0.021     # minimum connection length, gap at the bottom of the V (placeholder) [m]
+  gamma_sheath: 5.0  # sheath heat transmission coefficient, electrons only (cold ions, Ti = 0 in c_s)
   n_neutral_0: 0.0e+21  # initial neutral density, flat [m^-3] (boundary conditions in bnd_conditions.nn)
   D_n: 50.0             # neutral diffusion coefficient [m^2/s]
   R_recycling: 1.0      # fraction of the ions lost to the sheath that return as neutrals

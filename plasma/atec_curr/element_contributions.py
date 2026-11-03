@@ -1,6 +1,6 @@
 import numpy as np
 from constants import *
-from plasma_functions import c_sound, eta_spitzer
+from plasma_functions import c_sound, eta_spitzer, L_parallel
 from atomic_rates import ionisation_rate, recombination_rate, line_radiation_coefficient, continuum_radiation_coefficient
 
 
@@ -28,7 +28,10 @@ def get_element_contributions(element, nodes,
     # physics: diffusion coefficients [m^2/s]
     D_perp   = float(input_params["physics"]["D_perp"])
     chi_perp = float(input_params["physics"]["chi_perp"])
-    L_par    = float(input_params["physics"]["L_par"])
+    # parallel connection length L_par(x) between the roof-top panels (see L_parallel)
+    h_gap       = float(input_params["physics"]["h_gap"])
+    theta_panel = float(input_params["physics"]["theta_panel"])
+    d_gap_min   = float(input_params["physics"]["d_gap_min"])
     gamma_sheath = float(input_params["physics"]["gamma_sheath"])
 
     # neutrals: diffusion coefficient [m^2/s] and fraction of the ions lost to the sheath that recycle as neutrals
@@ -52,6 +55,7 @@ def get_element_contributions(element, nodes,
     E_ionization = float(input_params["physics"]["E_ionization"])
 
     # Get quantities at gaussian points
+    x0        = np.zeros(N_GAUSS)
     x0_s      = np.zeros(N_GAUSS)
     values    = np.zeros((N_GAUSS, N_VAR))    # values[igauss, i_var]
     values_s  = np.zeros((N_GAUSS, N_VAR))    # derivatives with respect to the local coordinate
@@ -65,6 +69,7 @@ def get_element_contributions(element, nodes,
         for i_v in range(NODES_PER_ELEM):
             node = nodes[i_v]
             for i_dof in range(N_DOF_NODE):
+                x0[igauss]               +=  H[i_v,i_dof]   * sizes[i_v,i_dof] * node.coord[i_dof]
                 x0_s[igauss]             +=  H_s[i_v,i_dof] * sizes[i_v,i_dof] * node.coord[i_dof]
                 values[igauss, I_N]      +=  H[i_v,i_dof]   * sizes[i_v,i_dof] * node.values[I_N,i_dof]
                 values_s[igauss, I_N]    +=  H_s[i_v,i_dof] * sizes[i_v,i_dof] * node.values[I_N,i_dof]
@@ -76,6 +81,7 @@ def get_element_contributions(element, nodes,
 
     for igauss in range(N_GAUSS):
         x_jac = x0_s[igauss]
+        L_par = L_parallel(x0[igauss], h_gap, theta_panel, d_gap_min)
         n0    = values[igauss, I_N]
         T0    = values[igauss, I_T]
         n0_x  = values_s[igauss, I_N] / x_jac
@@ -89,10 +95,10 @@ def get_element_contributions(element, nodes,
         Te_eV = T0 * T_ref           # electron temperature [eV]
         n_neutral = nn0 * n_ref      # neutral density [m^-3]
 
-        # sound speed
+        # sound speed with cold ions (Ti = 0): T is the electron temperature
         # (T used in cs is floored at T_min_cs, with zero derivative below it)
         Te_cs = max(Te_eV, T_min_cs)
-        cs0, cs0_T = c_sound(Te_cs, Te_cs)
+        cs0, cs0_T = c_sound(Te_cs, 0.0)
         if Te_eV < T_min_cs:
             cs0_T = 0.0
         cs0_T = cs0_T * T_ref                    # d cs / d(T/T_ref), unknown is the normalized T
