@@ -43,7 +43,8 @@ def coulomb_log(Te, ne):
             Coulomb_Log = 23.0000 - np.log((ne*1e-6)**0.5*Te**(-1.5))
         else:
             Coulomb_Log = 24.1513 - np.log((ne*1e-6)**0.5*Te**(-1.0))
-    return Coulomb_Log
+    #return Coulomb_Log
+    return 16.6
 
 def coulomb_log_ee(Te, ne):
     
@@ -79,8 +80,8 @@ def e_collision_mean_free_path(Te, ne, Zeff, ni):
 
 def heat_diff_spitzer(Te, ne, Te_min):
     TeKeV = np.max([Te, Te_min]) * 1e-3 
-    chi = 3.6e29 * TeKeV**(2.5) / ne
-    chi_T = 9.0e29 * TeKeV**(1.5) / ne * 1e-3
+    chi = 3.6e29 * TeKeV**(2.5) / ne 
+    chi_T = 9.0e29 * TeKeV**(1.5) / ne * 1e-3 
     if (Te <= Te_min):
         chi_T = 0.0
     return chi, chi_T

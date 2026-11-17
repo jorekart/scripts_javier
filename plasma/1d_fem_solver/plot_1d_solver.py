@@ -2,15 +2,12 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
-import h5py
-import numpy as np
-import matplotlib.pyplot as plt
-
 
 def plot_solution(
     filename,
     selected_times=None,
     n_slices=5,
+    average_filename="x_average_values.dat",
 ):
     """
     Plot solution profiles from an HDF5 solution file.
@@ -27,13 +24,27 @@ def plot_solution(
     n_slices : int, optional
         Number of equally spaced snapshots (in index
         space) to plot when selected_times is None.
+
+    average_filename : str, optional
+        Output text file for the x-average at every stored time.
     """
 
     with h5py.File(filename, "r") as f:
 
         xvals = f["xvals"][:]
         times = f["time"][:]
-        varvals = f["varvals"]
+        varvals = f["varvals"][:]
+
+        # Spatial average for every stored time. Trapezoidal integration also
+        # handles a non-uniform x grid correctly.
+        x_average = np.trapz(varvals, x=xvals, axis=1) / (xvals[-1] - xvals[0])
+
+        np.savetxt(
+            average_filename,
+            np.column_stack((times, x_average)),
+            header="time[s] x_average",
+        )
+        print(f"Wrote x-averaged values to {average_filename}")
 
         plt.figure(figsize=(8, 5))
 

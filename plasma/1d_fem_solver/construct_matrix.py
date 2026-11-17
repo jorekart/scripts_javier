@@ -8,7 +8,7 @@ def index_global(i_node, i_dof):
 
     return N_DOF_NODE * i_node + i_dof
 
-def construct_matrix(grid, input_params):
+def construct_matrix(grid, input_params, jphi_profile=None, B_profile=None):
 
     n_dofs_tot = grid.n_dofs_tot
     a_mat = np.zeros((n_dofs_tot, n_dofs_tot))
@@ -27,7 +27,8 @@ def construct_matrix(grid, input_params):
         nodes = [grid.nodes[inode1], grid.nodes[inode2]]
 
         a_loc, rhs_loc = get_element_contributions(element, nodes, 
-                                                   H_gauss, H_s_gauss, H_ss_gauss, input_params)
+                                                   H_gauss, H_s_gauss, H_ss_gauss, input_params,
+                                                   jphi_profile, B_profile)
 
         for i_v in range(NODES_PER_ELEM):
             for i_dof in range(N_DOF_NODE):
